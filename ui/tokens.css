@@ -1,0 +1,64 @@
+/* Design tokens. See docs/design.md. */
+:root {
+  color-scheme: light dark;
+
+  --font-ui: system-ui, -apple-system, "Segoe UI", "Noto Sans", sans-serif;
+  --text-xs: 11px;
+  --text-sm: 13px;
+  --text-md: 14px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+
+  --radius-sm: 8px;
+  --radius-full: 999px;
+
+  --size-toolbar: 48px;
+  --size-tab-row: 40px;
+  --size-download-bar: 44px;
+  --size-tab: 220px;
+  --size-control: 32px;
+  --size-icon: 18px;
+
+  --motion-fast: 120ms;
+  --motion-ease: cubic-bezier(0.2, 0, 0, 1);
+
+  --tab-row: #e6e6ea;
+  --surface: #f7f7f8;
+  --field: #ececef;
+  --field-focus: #ffffff;
+  --hover: rgb(0 0 0 / 7%);
+  --press: rgb(0 0 0 / 12%);
+  --divider: #dcdde1;
+  --text: #1c1d21;
+  --text-muted: #62656e;
+  --text-disabled: #b1b3ba;
+  --accent: #2f6fed;
+  --page: #ffffff;
+  --danger: #c5362c;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --tab-row: #16171a;
+    --surface: #1f2024;
+    --field: #2c2d32;
+    --field-focus: #16171a;
+    --hover: rgb(255 255 255 / 8%);
+    --press: rgb(255 255 255 / 14%);
+    --divider: #33343a;
+    --text: #e8e9ec;
+    --text-muted: #a0a3ad;
+    --text-disabled: #5a5c64;
+    --accent: #7ba4ff;
+    --page: #16171a;
+    --danger: #ff8a80;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-fast: 0ms;
+  }
+}

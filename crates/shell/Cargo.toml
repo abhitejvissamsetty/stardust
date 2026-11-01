@@ -1,0 +1,32 @@
+[package]
+name = "shell"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# On Windows, CEF's sandbox requires the app to be a DLL that bootstrap.exe loads,
+# and the DLL must share the executable's name. Library names can't contain hyphens.
+[lib]
+name = "rust_browser"
+crate-type = ["cdylib"]
+
+[[bin]]
+name = "rust_browser"
+path = "src/main.rs"
+
+[[bin]]
+name = "rust_browser_helper"
+path = "src/bin/helper.rs"
+
+[features]
+default = ["sandbox"]
+sandbox = ["cef-host/sandbox"]
+
+[package.metadata.cef.bundle]
+helper_name = "rust_browser_helper"
+
+[dependencies]
+cef-host = { path = "../cef-host", default-features = false, features = ["bundled-sqlite"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+cef.workspace = true

@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux build tools
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -q && sudo apt-get install -yq ninja-build libglib2.0-dev
+      - name: Install Windows build tools
+        if: runner.os == 'Windows'
+        run: choco install ninja -y
+      - name: Install macOS build tools
+        if: runner.os == 'macOS'
+        run: brew install ninja
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace -- -D warnings
+      - run: cargo test --workspace
+      - run: cargo xtask bundle --release
+      - name: Check performance budgets
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -yq xvfb libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 libasound2t64 libpango-1.0-0
+          xvfb-run -a cargo run --release -p perf -- dist

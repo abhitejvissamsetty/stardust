@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'"
+    />
+    <title>Toolbar</title>
+    <style>
+      /*TOKENS*/
+      /*TOOLBAR*/
+    </style>
+  </head>
+  <body>
+    <div class="tab-row">
+      <div class="tabs" id="tabs" role="tablist" aria-label="Tabs"></div>
+      <button class="icon-button" id="new-tab" title="New tab" aria-label="New tab">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+      </button>
+    </div>
+    <nav class="toolbar" aria-label="Browser controls">
+      <button class="icon-button" id="back" title="Back" aria-label="Back" disabled>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6" /></svg>
+      </button>
+      <button class="icon-button" id="forward" title="Forward" aria-label="Forward" disabled>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+      </button>
+      <button class="icon-button" id="reload" title="Reload" aria-label="Reload">
+        <svg id="reload-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5" />
+        </svg>
+        <svg id="stop-icon" viewBox="0 0 24 24" aria-hidden="true" hidden>
+          <path d="M6 6l12 12M18 6L6 18" />
+        </svg>
+      </button>
+      <form class="address" id="address-form" role="search">
+        <svg id="lock-icon" viewBox="0 0 24 24" aria-hidden="true" hidden>
+          <rect x="5" y="11" width="14" height="9" rx="2" />
+          <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+        </svg>
+        <input
+          id="address"
+          type="text"
+          aria-label="Address and search"
+          placeholder="Search or enter address"
+          autocomplete="off"
+          autocapitalize="off"
+          spellcheck="false"
+        />
+        <button class="icon-button star" id="star" type="button" title="Bookmark this page" aria-label="Bookmark this page" aria-pressed="false" disabled>
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 4l2.5 5.2 5.7.8-4.1 4 1 5.7L12 17l-5.1 2.7 1-5.7-4.1-4 5.7-.8z" />
+          </svg>
+        </button>
+      </form>
+      <button class="icon-button" id="open-bookmarks" title="Bookmarks" aria-label="Bookmarks">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10a1 1 0 0 1 1 1v15l-6-4-6 4V5a1 1 0 0 1 1-1z" /></svg>
+      </button>
+      <button class="icon-button" id="open-history" title="History" aria-label="History">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" /><path d="M12 8v4l3 2" /></svg>
+      </button>
+      <button class="icon-button" id="open-settings" title="Settings" aria-label="Settings">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10" /><circle cx="16" cy="7" r="2" /><circle cx="8" cy="17" r="2" /></svg>
+      </button>
+      <div class="progress" id="progress"></div>
+    </nav>
+    <section class="find" id="find" aria-label="Find in page" hidden>
+      <input id="find-input" type="text" placeholder="Find in page" aria-label="Find in page" autocomplete="off" spellcheck="false" />
+      <span class="find-count" id="find-count" role="status"></span>
+      <button class="icon-button" id="find-previous" title="Previous match" aria-label="Previous match">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 15l6-6 6 6" /></svg>
+      </button>
+      <button class="icon-button" id="find-next" title="Next match" aria-label="Next match">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
+      </button>
+      <button class="icon-button" id="find-close" title="Close find bar" aria-label="Close find bar">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+      </button>
+    </section>
+    <section class="downloads" id="downloads" aria-label="Downloads" hidden>
+      <div class="download-list" id="download-list"></div>
+      <button class="text-button" id="clear-downloads">Clear</button>
+    </section>
+    <script>
+      /*APP*/
+    </script>
+  </body>
+</html>
