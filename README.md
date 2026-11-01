@@ -1,6 +1,6 @@
-# rust-browser
+# Stardust
 
-An open-source, lightweight browser written in Rust on top of Chromium, through the
+By Ambiqa. An open-source, lightweight browser written in Rust on top of Chromium, through the
 [Chromium Embedded Framework](https://github.com/chromiumembedded/cef) and
 [`cef-rs`](https://github.com/tauri-apps/cef-rs).
 
@@ -13,7 +13,7 @@ Needs Rust, CMake and Ninja. The first build downloads CEF (about 330 MB) for ea
 
 ```bash
 cargo xtask bundle --release
-./dist/rust_browser --url=https://example.com/
+./dist/stardust --url=https://example.com/
 ```
 
 ## Layout

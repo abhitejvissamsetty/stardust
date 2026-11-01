@@ -6,7 +6,7 @@ use cef::*;
 use crate::{
     client::{
         SharedShell, ToolbarClient, clear_window, prepare_tabs, register_shell, select_tab,
-        set_window, startup_windows, toolbar_height, try_close_all,
+        set_window, startup_windows, toolbar_height, try_close_all, window_activated,
     },
     render::BridgeInstaller,
     ui::toolbar_url,
@@ -134,6 +134,12 @@ wrap_window_delegate! {
 
         fn can_close(&self, _window: Option<&mut Window>) -> i32 {
             try_close_all(&self.shell).into()
+        }
+
+        fn on_window_activation_changed(&self, _window: Option<&mut Window>, active: i32) {
+            if active != 0 {
+                window_activated(&self.shell);
+            }
         }
 
         fn window_runtime_style(&self) -> RuntimeStyle {

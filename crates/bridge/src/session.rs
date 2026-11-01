@@ -6,6 +6,11 @@ use crate::{InternalPage, TabStrip, is_web_url};
 pub struct SessionTab {
     pub url: String,
     pub title: String,
+    /// The tab's Back and Forward list.
+    #[serde(default)]
+    pub entries: Vec<String>,
+    #[serde(default)]
+    pub index: usize,
 }
 
 /// The open tabs, saved so they can come back after a restart or a crash.
@@ -19,6 +24,20 @@ fn can_restore(url: &str) -> bool {
     is_web_url(url) || InternalPage::from_address(url).is_some()
 }
 
+impl SessionTab {
+    /// Drops list entries that can't be reopened, keeping the position on the same page.
+    fn keep_restorable_entries(&mut self) {
+        let before = self
+            .entries
+            .iter()
+            .take(self.index)
+            .filter(|url| can_restore(url))
+            .count();
+        self.entries.retain(|url| can_restore(url));
+        self.index = before.min(self.entries.len().saturating_sub(1));
+    }
+}
+
 impl Session {
     /// Blank tabs and anything else that can't be reopened are left out.
     pub fn from_strip(strip: &TabStrip) -> Self {
@@ -28,10 +47,14 @@ impl Session {
                 if Some(tab.id) == strip.active_id() {
                     session.active = session.tabs.len();
                 }
-                session.tabs.push(SessionTab {
+                let mut tab = SessionTab {
                     url: tab.page.url.clone(),
                     title: tab.title.clone(),
-                });
+                    entries: tab.history_entries.clone(),
+                    index: tab.history_index,
+                };
+                tab.keep_restorable_entries();
+                session.tabs.push(tab);
             }
         }
         session
@@ -40,6 +63,9 @@ impl Session {
     /// Saved URLs are checked again, because the file could have been edited.
     fn sanitized(mut self) -> Self {
         self.tabs.retain(|tab| can_restore(&tab.url));
+        for tab in &mut self.tabs {
+            tab.keep_restorable_entries();
+        }
         self.active = self.active.min(self.tabs.len().saturating_sub(1));
         self
     }
@@ -117,6 +143,41 @@ mod tests {
     fn a_blank_active_tab_falls_back_to_the_first() {
         let session = Session::from_strip(&strip_with(&["https://a.com", "about:blank"], 1));
         assert_eq!(session.active, 0);
+    }
+
+    #[test]
+    fn saves_each_tabs_history() {
+        let mut strip = strip_with(&["https://b.com"], 0);
+        let id = strip.active_id().unwrap();
+        let tab = strip.get_mut(id).unwrap();
+        tab.history_entries = vec![
+            "https://a.com".into(),
+            "file:///skip".into(),
+            "https://b.com".into(),
+            "https://c.com".into(),
+        ];
+        tab.history_index = 2;
+        let saved = &Session::from_strip(&strip).tabs[0];
+        assert_eq!(
+            saved.entries,
+            ["https://a.com", "https://b.com", "https://c.com"]
+        );
+        assert_eq!(saved.entries[saved.index], "https://b.com");
+    }
+
+    #[test]
+    fn sessions_without_history_still_load() {
+        let json = r#"{"tabs":[{"url":"https://a.com","title":"A"}],"active":0}"#;
+        let saved = SavedWindows::parse(json);
+        assert!(saved.windows[0].tabs[0].entries.is_empty());
+    }
+
+    #[test]
+    fn edited_history_cannot_contain_unsafe_urls() {
+        let json = r#"{"windows":[{"tabs":[{"url":"https://a.com","title":"","entries":["javascript:x","https://a.com"],"index":1}],"active":0}]}"#;
+        let tab = &SavedWindows::parse(json).windows[0].tabs[0];
+        assert_eq!(tab.entries, ["https://a.com"]);
+        assert_eq!(tab.index, 0);
     }
 
     #[test]

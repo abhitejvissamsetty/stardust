@@ -1,10 +1,14 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{Download, InternalPage, TabId, TabStrip};
+use crate::{Download, InternalPage, TabId, TabStrip, storage_types};
 
 /// Sent by the toolbar page.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum UiCommand {
     Ready,
     Navigate {
@@ -42,6 +46,41 @@ pub enum UiCommand {
         again: bool,
     },
     CloseFind,
+    OpenDownload {
+        id: u32,
+        confirmed: bool,
+    },
+    /// Asks for bookmarks and history matching what's typed in the address bar.
+    Suggest {
+        query: String,
+    },
+    /// Shows the menu under the toolbar with the given contents.
+    ShowPopup {
+        left: i32,
+        top: i32,
+        width: i32,
+        height: i32,
+        contents: serde_json::Value,
+    },
+    HidePopup,
+    PopupReady,
+    /// Goes ahead with closing despite active downloads, or decides against it.
+    ConfirmClose {
+        close: bool,
+    },
+    AnswerDialog {
+        accepted: bool,
+        input: String,
+    },
+    /// A tab was dragged out of its window and dropped on nothing.
+    TearOffTab {
+        id: TabId,
+    },
+    /// A tab from another window was dropped on this window's tab strip.
+    AdoptTab {
+        from_window: u32,
+        id: TabId,
+    },
     OpenPage {
         page: InternalPage,
     },
@@ -49,15 +88,42 @@ pub enum UiCommand {
 
 /// Sent to the toolbar page.
 #[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum UiEvent<'a> {
     Tabs {
         strip: &'a TabStrip,
+        window_id: u32,
     },
     Downloads {
         items: &'a [Download],
     },
     FocusAddress,
+    Suggestions {
+        query: &'a str,
+        items: &'a [storage_types::SuggestionItem],
+    },
+    BookmarksBar {
+        bookmarks: &'a [storage_types::SuggestionItem],
+        folders: &'a [storage_types::FolderItems],
+    },
+    /// Closing would cancel this many downloads.
+    ConfirmClose {
+        downloads: usize,
+    },
+    /// A page asks something. `kind` is alert, confirm, prompt or leave.
+    ShowDialog {
+        kind: &'a str,
+        origin: &'a str,
+        message: &'a str,
+        default_text: &'a str,
+    },
+    HideDialog,
+    /// The page took focus, so the address bar stops editing.
+    PageFocused,
     ShowFind,
     HideFind,
     FindResult {
@@ -135,7 +201,11 @@ mod tests {
     #[test]
     fn events_use_javascript_field_names() {
         let strip = TabStrip::default();
-        let json = serde_json::to_string(&UiEvent::Tabs { strip: &strip }).unwrap();
+        let json = serde_json::to_string(&UiEvent::Tabs {
+            strip: &strip,
+            window_id: 1,
+        })
+        .unwrap();
         assert!(json.contains(r#""type":"tabs""#));
         assert!(json.contains(r#""activeId":null"#));
     }

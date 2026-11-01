@@ -41,6 +41,8 @@ body {
   flex: 0 1 auto;
   gap: 2px;
   min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
 
 .tab {
@@ -52,7 +54,7 @@ body {
   width: var(--size-tab);
   gap: var(--space-2);
   height: var(--size-control);
-  min-width: var(--size-control);
+  min-width: var(--size-tab-min);
   padding: 0 var(--space-1) 0 var(--space-3);
   transition: background-color var(--motion-fast) var(--motion-ease);
 }
@@ -117,6 +119,7 @@ body {
 }
 
 .icon-button#new-tab {
+  flex: none;
   height: 28px;
   width: 28px;
 }
@@ -237,6 +240,120 @@ svg {
     transform var(--motion-fast) var(--motion-ease),
     opacity var(--motion-fast) var(--motion-ease);
   width: 100%;
+}
+
+.dialog {
+  align-items: center;
+  background: var(--field);
+  border-bottom: 1px solid var(--divider);
+  display: flex;
+  gap: var(--space-2);
+  height: var(--size-dialog-bar);
+  padding: 0 var(--space-3);
+}
+
+.dialog-text {
+  flex: 1;
+  line-height: 1.3;
+  min-width: 0;
+}
+
+.dialog-origin,
+.dialog-message {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dialog-origin {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.dialog-message {
+  font-size: var(--text-sm);
+}
+
+.dialog input {
+  background: var(--surface);
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  flex: none;
+  font: inherit;
+  font-size: var(--text-sm);
+  height: var(--size-control);
+  padding: 0 var(--space-3);
+  width: 280px;
+}
+
+.dialog input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.text-button.primary {
+  background: var(--accent);
+  color: var(--page);
+}
+
+.text-button.primary:hover {
+  background: var(--accent);
+  opacity: 0.9;
+}
+
+.bookmarks-bar {
+  align-items: center;
+  background: var(--surface);
+  border-bottom: 1px solid var(--divider);
+  display: flex;
+  gap: 2px;
+  height: var(--size-bookmarks-bar);
+  overflow: hidden;
+  padding: 0 var(--space-2);
+}
+
+.bookmark {
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text);
+  flex: none;
+  font: inherit;
+  font-size: var(--text-sm);
+  height: 26px;
+  max-width: 180px;
+  overflow: hidden;
+  padding: 0 var(--space-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bookmark:hover {
+  background: var(--hover);
+}
+
+.bookmark:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.bookmark.folder::before {
+  content: "▸ ";
+  color: var(--text-muted);
+}
+
+.close-warning {
+  align-items: center;
+  display: flex;
+  flex: none;
+  font-size: var(--text-sm);
+  gap: var(--space-1);
+}
+
+.text-button.danger {
+  color: var(--danger);
 }
 
 .find {

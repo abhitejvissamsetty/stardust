@@ -11,10 +11,15 @@ const tabsElement = byId("tabs");
 const CLOSE_ICON =
   '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>';
 
+const OPEN_ICON =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" /></svg>';
 const FOLDER_ICON =
   '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>';
 
 let strip = { tabs: [], activeId: null };
+let shownActiveId = null;
+let windowId = 0;
+let selectOnClick = false;
 let drag = null;
 
 const send = (command) => window.browserBridge.send(JSON.stringify(command));
@@ -65,29 +70,42 @@ function createTabElement(id) {
       send({ type: "selectTab", id });
     }
   });
-  element.addEventListener("pointerdown", (event) => startDrag(event, id, element));
+  element.draggable = true;
+  element.addEventListener("pointerdown", (event) => {
+    if (event.button === 0) {
+      send({ type: "selectTab", id });
+    }
+  });
+  element.addEventListener("dragstart", (event) => startDrag(event, id, element));
+  element.addEventListener("dragend", finishDrag);
   return element;
 }
 
+// Dragging uses native drag and drop, the only events that keep working once the
+// pointer leaves this toolbar's view.
+const TAB_DRAG_TYPE = "application/x-stardust-tab";
+const TEAR_OFF_DELAY_MS = 200;
+
 function startDrag(event, id, element) {
-  if (event.button !== 0) {
-    return;
-  }
-  send({ type: "selectTab", id });
-  drag = { id, element, startX: event.clientX, moved: false };
-  element.setPointerCapture(event.pointerId);
+  drag = { id, element, dropped: false };
+  element.classList.add("dragging");
+  event.dataTransfer.effectAllowed = "move";
+  event.dataTransfer.setData(TAB_DRAG_TYPE, JSON.stringify({ windowId, id }));
 }
 
-function continueDrag(event) {
+function isTabDrag(event) {
+  return event.dataTransfer.types.includes(TAB_DRAG_TYPE);
+}
+
+function dragOverStrip(event) {
+  if (!isTabDrag(event)) {
+    return;
+  }
+  event.preventDefault();
+  event.dataTransfer.dropEffect = "move";
   if (!drag) {
     return;
   }
-  if (!drag.moved && Math.abs(event.clientX - drag.startX) < 6) {
-    return;
-  }
-  drag.moved = true;
-  drag.element.classList.add("dragging");
-
   const others = [...tabsElement.children].filter((child) => child !== drag.element);
   const before = others.find((child) => {
     const box = child.getBoundingClientRect();
@@ -96,15 +114,39 @@ function continueDrag(event) {
   tabsElement.insertBefore(drag.element, before || null);
 }
 
-function finishDrag() {
+function dropOnStrip(event) {
+  if (!isTabDrag(event)) {
+    return;
+  }
+  event.preventDefault();
+  if (drag) {
+    drag.dropped = true;
+    send({ type: "moveTab", id: drag.id, index: [...tabsElement.children].indexOf(drag.element) });
+    return;
+  }
+  // It came from another window. Only ever a pair of numbers, whatever was dragged.
+  const data = JSON.parse(event.dataTransfer.getData(TAB_DRAG_TYPE));
+  send({ type: "adoptTab", fromWindow: Number(data.windowId), id: Number(data.id) });
+}
+
+function finishDrag(event) {
   if (!drag) {
     return;
   }
-  const { id, element, moved } = drag;
+  const { id, element, dropped } = drag;
   drag = null;
   element.classList.remove("dragging");
-  if (moved) {
+  const row = document.querySelector(".tab-row").getBoundingClientRect();
+  const inRow = event.clientX >= row.left && event.clientX < row.right
+    && event.clientY >= row.top && event.clientY < row.bottom;
+  if (dropped) {
+    // The strip already handled it.
+  } else if (inRow) {
     send({ type: "moveTab", id, index: [...tabsElement.children].indexOf(element) });
+  } else {
+    // Wait a moment, so another window's strip can claim it first. If one does, this
+    // tab has already left and the request does nothing.
+    setTimeout(() => send({ type: "tearOffTab", id }), TEAR_OFF_DELAY_MS);
   }
   render();
 }
@@ -123,6 +165,10 @@ function renderTabs() {
   }
   for (const element of existing.values()) {
     element.remove();
+  }
+  if (strip.activeId !== shownActiveId) {
+    shownActiveId = strip.activeId;
+    tabsElement.querySelector('[aria-selected="true"]')?.scrollIntoView({ inline: "nearest", block: "nearest" });
   }
 }
 
@@ -229,6 +275,19 @@ function renderDownloads(items) {
       element.append(bar);
     } else {
       if (item.state === "complete") {
+        const open = actionButton("Open", OPEN_ICON, { type: "openDownload", id, confirmed: false });
+        if (item.isRisky) {
+          // This file type could run code, so ask before opening it.
+          const risky = open.cloneNode(true);
+          risky.addEventListener("click", () => {
+            if (confirm(`"${item.fileName}" could change your computer if it runs. Open it only if you trust where it came from. Open it?`)) {
+              send({ type: "openDownload", id, confirmed: true });
+            }
+          });
+          element.append(risky);
+        } else {
+          element.append(open);
+        }
         element.append(actionButton("Show in folder", FOLDER_ICON, { type: "showDownload", id }));
       }
       element.append(actionButton("Remove from list", CLOSE_ICON, { type: "dismissDownload", id }));
@@ -240,12 +299,129 @@ function renderDownloads(items) {
 
 const findInput = byId("find-input");
 
+// Page dialogs. The message and origin come from the page, so they're only set as text.
+function showDialog(event) {
+  const isLeave = event.kind === "leave";
+  let origin = "";
+  try {
+    origin = event.origin ? `${new URL(event.origin).host} says` : "";
+  } catch {
+    origin = event.origin;
+  }
+  byId("dialog-origin").textContent = isLeave ? "Leave this site?" : origin;
+  const message = isLeave ? "Changes you made may not be saved." : event.message;
+  byId("dialog-message").textContent = message;
+  byId("dialog-message").title = message;
+  byId("dialog-cancel").hidden = event.kind === "alert";
+  byId("dialog-cancel").textContent = isLeave ? "Stay" : "Cancel";
+  byId("dialog-ok").textContent = isLeave ? "Leave" : "OK";
+  const input = byId("dialog-input");
+  input.hidden = event.kind !== "prompt";
+  input.value = event.defaultText;
+  byId("dialog").hidden = false;
+  if (event.kind === "prompt") {
+    input.focus();
+    input.select();
+  } else {
+    byId("dialog-ok").focus();
+  }
+}
+
+function answerDialog(accepted) {
+  byId("dialog").hidden = true;
+  send({ type: "answerDialog", accepted, input: byId("dialog-input").value });
+}
+
+const POPUP_ROW = 36;
+let suggestions = [];
+let selectedSuggestion = -1;
+let typedQuery = "";
+
+function showPopupUnder(element, items, selected, minimumWidth = 0) {
+  const box = element.getBoundingClientRect();
+  send({
+    type: "showPopup",
+    left: Math.round(box.left),
+    top: Math.round(box.bottom) + 2,
+    width: Math.max(Math.round(box.width), minimumWidth),
+    height: items.length * POPUP_ROW + 10,
+    contents: { type: "items", items, selected },
+  });
+}
+
+function hideSuggestions() {
+  if (suggestions.length > 0) {
+    suggestions = [];
+    selectedSuggestion = -1;
+    send({ type: "hidePopup" });
+  }
+}
+
+function renderBookmarksBar(bookmarks, folders) {
+  const bar = byId("bookmarks-bar");
+  const button = (label, title, onClick, className) => {
+    const element = document.createElement("button");
+    element.className = className;
+    // Titles come from websites, so they're only ever set as text.
+    element.textContent = label;
+    element.title = title;
+    element.addEventListener("click", onClick);
+    return element;
+  };
+  const folderButtons = folders.map((folder) =>
+    button(folder.name, folder.name, (event) => {
+      if (folder.items.length > 0) {
+        event.stopPropagation();
+        showPopupUnder(event.currentTarget, folder.items, -1, 320);
+        folderMenuOpen = true;
+      }
+    }, "bookmark folder"));
+  const bookmarkButtons = bookmarks.map((item) =>
+    button(item.title || item.url, item.url, () => send({ type: "navigate", input: item.url }), "bookmark"));
+  bar.replaceChildren(...folderButtons, ...bookmarkButtons);
+  bar.hidden = folderButtons.length + bookmarkButtons.length === 0;
+}
+
+let folderMenuOpen = false;
+document.addEventListener("click", () => {
+  if (folderMenuOpen) {
+    folderMenuOpen = false;
+    send({ type: "hidePopup" });
+  }
+});
+
 function runFind(forward, again) {
   send({ type: "find", text: findInput.value, forward, again });
 }
 
 window.onBrowserEvent = (event) => {
-  if (event.type === "showFind") {
+  if (event.type === "suggestions") {
+    if (event.query !== address.value.trim() || document.activeElement !== address) {
+      return;
+    }
+    suggestions = event.items;
+    selectedSuggestion = -1;
+    if (suggestions.length > 0) {
+      showPopupUnder(byId("address-form"), suggestions, -1);
+    } else {
+      send({ type: "hidePopup" });
+    }
+  } else if (event.type === "showDialog") {
+    showDialog(event);
+  } else if (event.type === "hideDialog") {
+    byId("dialog").hidden = true;
+  } else if (event.type === "pageFocused") {
+    hideSuggestions();
+    address.blur();
+  } else if (event.type === "bookmarksBar") {
+    renderBookmarksBar(event.bookmarks, event.folders);
+  } else if (event.type === "confirmClose") {
+    byId("downloads").hidden = false;
+    byId("close-warning").hidden = false;
+    const count = event.downloads;
+    byId("close-warning-text").textContent =
+      `Closing will cancel ${count} ${count === 1 ? "download" : "downloads"}.`;
+  } else if (event.type === "showFind") {
     byId("find").hidden = false;
     findInput.focus();
     findInput.select();
@@ -268,8 +444,12 @@ window.onBrowserEvent = (event) => {
   } else if (event.type === "tabs") {
     const switched = event.strip.activeId !== strip.activeId;
     strip = event.strip;
-    if (switched && document.activeElement === address) {
-      address.blur();
+    windowId = event.windowId;
+    if (switched) {
+      hideSuggestions();
+      if (document.activeElement === address) {
+        address.blur();
+      }
     }
     render();
   } else if (event.type === "focusAddress") {
@@ -280,9 +460,21 @@ window.onBrowserEvent = (event) => {
   }
 };
 
-tabsElement.addEventListener("pointermove", continueDrag);
-tabsElement.addEventListener("pointerup", finishDrag);
-tabsElement.addEventListener("pointercancel", finishDrag);
+// Moving focus to the page leaves this page's focused element in place, so end editing
+// explicitly. Otherwise the address bar wouldn't follow the page.
+window.addEventListener("blur", () => {
+  hideSuggestions();
+  address.blur();
+});
+
+tabsElement.addEventListener("wheel", (event) => {
+  event.preventDefault();
+  tabsElement.scrollLeft += event.deltaY || event.deltaX;
+}, { passive: false });
+// The whole row takes drops, including the empty space after the last tab.
+const tabRow = document.querySelector(".tab-row");
+tabRow.addEventListener("dragover", dragOverStrip);
+tabRow.addEventListener("drop", dropOnStrip);
 
 findInput.addEventListener("input", () => runFind(true, false));
 findInput.addEventListener("keydown", (event) => {
@@ -295,8 +487,28 @@ byId("find-previous").addEventListener("click", () => runFind(false, true));
 byId("find-next").addEventListener("click", () => runFind(true, true));
 byId("find-close").addEventListener("click", () => send({ type: "closeFind" }));
 
+byId("dialog-ok").addEventListener("click", () => answerDialog(true));
+byId("dialog-cancel").addEventListener("click", () => answerDialog(false));
+byId("dialog").addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    answerDialog(false);
+  } else if (event.key === "Enter" && event.target === byId("dialog-input")) {
+    event.preventDefault();
+    answerDialog(true);
+  }
+});
+
 byId("star").addEventListener("click", () => send({ type: "toggleBookmark" }));
-for (const page of ["bookmarks", "history", "settings"]) {
+byId("keep-downloading").addEventListener("click", () => {
+  byId("close-warning").hidden = true;
+  send({ type: "confirmClose", close: false });
+});
+byId("close-anyway").addEventListener("click", () => {
+  byId("close-warning").hidden = true;
+  send({ type: "confirmClose", close: true });
+});
+for (const page of ["bookmarks", "history", "settings", "downloads"]) {
   byId(`open-${page}`).addEventListener("click", () => send({ type: "openPage", page }));
 }
 byId("clear-downloads").addEventListener("click", () => send({ type: "clearDownloads" }));
@@ -309,16 +521,57 @@ reload.addEventListener("click", () => {
 
 byId("address-form").addEventListener("submit", (event) => {
   event.preventDefault();
+  hideSuggestions();
   send({ type: "navigate", input: address.value });
   address.blur();
 });
 
-address.addEventListener("focus", () => address.select());
-address.addEventListener("blur", render);
-address.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") {
-    address.value = shownUrl(activeTab()?.url ?? "");
+address.addEventListener("input", () => {
+  typedQuery = address.value;
+  const query = address.value.trim();
+  if (query) {
+    send({ type: "suggest", query });
+  } else {
+    hideSuggestions();
+  }
+});
+
+// Focus can come back to the address bar at any time, so selecting all its text only
+// happens on purpose: on the shortcut, or the first click into it.
+address.addEventListener("pointerdown", () => {
+  selectOnClick = document.activeElement !== address;
+});
+address.addEventListener("click", () => {
+  if (selectOnClick && address.selectionStart === address.selectionEnd) {
     address.select();
+  }
+  selectOnClick = false;
+});
+address.addEventListener("blur", () => {
+  render();
+  // Clicking a suggestion moves focus first, so give the click time to arrive.
+  setTimeout(() => {
+    if (document.activeElement !== address) {
+      hideSuggestions();
+    }
+  }, 200);
+});
+address.addEventListener("keydown", (event) => {
+  if ((event.key === "ArrowDown" || event.key === "ArrowUp") && suggestions.length > 0) {
+    event.preventDefault();
+    const step = event.key === "ArrowDown" ? 1 : -1;
+    const positions = suggestions.length + 1;
+    selectedSuggestion = ((selectedSuggestion + 1 + step + positions) % positions) - 1;
+    address.value = selectedSuggestion >= 0 ? suggestions[selectedSuggestion].url : typedQuery;
+    showPopupUnder(byId("address-form"), suggestions, selectedSuggestion);
+  } else if (event.key === "Escape") {
+    if (suggestions.length > 0) {
+      hideSuggestions();
+      address.value = typedQuery;
+    } else {
+      address.value = shownUrl(activeTab()?.url ?? "");
+      address.select();
+    }
   }
 });
 

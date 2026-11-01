@@ -22,6 +22,7 @@ pub enum Shortcut {
     History,
     Bookmarks,
     Settings,
+    Downloads,
 }
 
 /// A key press, using Windows virtual key codes as CEF reports them on every platform.
@@ -47,6 +48,7 @@ const F: i32 = 0x46;
 const G: i32 = 0x47;
 const H: i32 = 0x48;
 const F3: i32 = 0x72;
+const J: i32 = 0x4A;
 const L: i32 = 0x4C;
 const N: i32 = 0x4E;
 const O: i32 = 0x4F;
@@ -82,6 +84,7 @@ pub fn shortcut_for(key: KeyPress, is_mac: bool) -> Option<Shortcut> {
         (G, true, true, false) | (F3, false, true, false) => Some(Shortcut::FindPrevious),
         (D, true, false, false) => Some(Shortcut::ToggleBookmark),
         (H, true, false, false) => Some(Shortcut::History),
+        (J, true, false, false) => Some(Shortcut::Downloads),
         (O, true, true, false) => Some(Shortcut::Bookmarks),
         (COMMA, true, false, false) => Some(Shortcut::Settings),
         (T, true, false, false) => Some(Shortcut::NewTab),

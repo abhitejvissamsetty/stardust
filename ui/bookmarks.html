@@ -12,7 +12,16 @@
   <body data-page="bookmarks">
     <main>
       <h1>Bookmarks</h1>
-      <div class="toolbar-row"><input id="search" type="search" placeholder="Search bookmarks" aria-label="Search bookmarks" /></div><ul class="list" id="list"></ul><p class="empty" id="empty" hidden>No bookmarks found. Press the star in the address bar to add one.</p>
+      <div class="toolbar-row"><input id="search" type="search" placeholder="Search bookmarks" aria-label="Search bookmarks" /></div>
+      <section aria-label="Folders">
+        <div class="toolbar-row">
+          <input id="new-folder" type="text" placeholder="New folder name" aria-label="New folder name" />
+          <button class="quiet-button" id="add-folder">Add folder</button>
+        </div>
+        <ul class="list" id="folders"></ul>
+      </section>
+      <ul class="list" id="list"></ul>
+      <p class="empty" id="empty" hidden>No bookmarks found. Press the star in the address bar to add one.</p>
     </main>
     <script>
       /*SCRIPT*/

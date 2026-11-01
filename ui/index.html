@@ -60,11 +60,24 @@
       <button class="icon-button" id="open-history" title="History" aria-label="History">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" /><path d="M12 8v4l3 2" /></svg>
       </button>
+      <button class="icon-button" id="open-downloads" title="Downloads" aria-label="Downloads">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 11l5 5 5-5M5 20h14" /></svg>
+      </button>
       <button class="icon-button" id="open-settings" title="Settings" aria-label="Settings">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10" /><circle cx="16" cy="7" r="2" /><circle cx="8" cy="17" r="2" /></svg>
       </button>
       <div class="progress" id="progress"></div>
     </nav>
+    <section class="dialog" id="dialog" role="alertdialog" aria-labelledby="dialog-message" hidden>
+      <div class="dialog-text">
+        <span class="dialog-origin" id="dialog-origin"></span>
+        <span class="dialog-message" id="dialog-message"></span>
+      </div>
+      <input id="dialog-input" type="text" aria-label="Your answer" autocomplete="off" hidden />
+      <button class="text-button" id="dialog-cancel">Cancel</button>
+      <button class="text-button primary" id="dialog-ok">OK</button>
+    </section>
+    <nav class="bookmarks-bar" id="bookmarks-bar" aria-label="Bookmarks bar" hidden></nav>
     <section class="find" id="find" aria-label="Find in page" hidden>
       <input id="find-input" type="text" placeholder="Find in page" aria-label="Find in page" autocomplete="off" spellcheck="false" />
       <span class="find-count" id="find-count" role="status"></span>
@@ -80,6 +93,11 @@
     </section>
     <section class="downloads" id="downloads" aria-label="Downloads" hidden>
       <div class="download-list" id="download-list"></div>
+      <div class="close-warning" id="close-warning" role="alert" hidden>
+        <span id="close-warning-text"></span>
+        <button class="text-button" id="keep-downloading">Keep downloading</button>
+        <button class="text-button danger" id="close-anyway">Close anyway</button>
+      </div>
       <button class="text-button" id="clear-downloads">Clear</button>
     </section>
     <script>

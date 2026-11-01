@@ -49,9 +49,9 @@ fn main() {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("dist"));
     let binary = bundle.join(if cfg!(windows) {
-        "rust_browser.exe"
+        "stardust.exe"
     } else {
-        "rust_browser"
+        "stardust"
     });
     if !binary.is_file() {
         eprintln!(

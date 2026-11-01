@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-const APP: &str = "rust_browser";
+const APP: &str = "stardust";
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -43,12 +43,6 @@ fn bundle(output: &Path, _release: bool) -> PathBuf {
     use cef::build_util::mac::{BundleInfo, build_bundle};
 
     let version = env!("CARGO_PKG_VERSION").parse().expect("invalid version");
-    let info = BundleInfo::new(
-        APP,
-        "org.rust-browser.rust-browser",
-        "Rust Browser",
-        "English",
-        version,
-    );
+    let info = BundleInfo::new(APP, "com.ambiqa.stardust", "Stardust", "English", version);
     build_bundle(output, APP, info).expect("failed to bundle")
 }

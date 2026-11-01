@@ -64,7 +64,7 @@ pub fn run_helper() -> i32 {
 }
 
 pub(crate) fn data_dir() -> Option<std::path::PathBuf> {
-    directories::ProjectDirs::from("org", "rust-browser", "rust-browser")
+    directories::ProjectDirs::from("com", "Ambiqa", "Stardust")
         .map(|dirs| dirs.data_dir().to_path_buf())
 }
 

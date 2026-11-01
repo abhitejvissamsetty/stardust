@@ -3,24 +3,26 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use bridge::{
     Download, DownloadList, DownloadState, InternalPage, KeyPress, PageCommand, SavedWindows,
-    SearchEngine, Session, Settings, Shortcut, StartupMode, TabId, TabStrip, UiCommand, UiEvent,
-    error_page, is_web_url, normalize_homepage, resolve_input, safe_file_name, shortcut_for,
+    SearchEngine, Session, SessionTab, Settings, Shortcut, StartupMode, TabHistory, TabId,
+    TabStrip, UiCommand, UiEvent, error_page, is_risky_file, is_web_url, normalize_homepage,
+    resolve_input, safe_file_name, shortcut_for,
+    storage_types::{FolderItems, SuggestionItem},
     unique_path,
 };
 use cef::*;
 
-use storage::Storage;
+use storage::{DownloadRecord, Storage};
 
 use crate::{
     app::open_window,
     data_dir,
     render::UI_COMMAND_MESSAGE,
-    ui::{internal_page_for_url, internal_url},
+    ui::{internal_page_for_url, internal_url, popup_url},
 };
 
 const ERR_ABORTED: i32 = -3;
@@ -37,6 +39,14 @@ const SETTING_SESSION: &str = "session";
 const TOOLBAR_HEIGHT: i32 = 88;
 const DOWNLOAD_BAR_HEIGHT: i32 = 44;
 const FIND_BAR_HEIGHT: i32 = 44;
+const BOOKMARKS_BAR_HEIGHT: i32 = 34;
+const DIALOG_BAR_HEIGHT: i32 = 56;
+/// Pages control this text, so a long message can't take over the bar.
+const DIALOG_MESSAGE_LIMIT: usize = 500;
+const SUGGESTION_LIMIT: usize = 6;
+const BOOKMARKS_BAR_LIMIT: u32 = 200;
+const SETTING_ASK_DOWNLOAD_LOCATION: &str = "ask_download_location";
+const CLEAR_ORIGIN_LIMIT: u32 = 2000;
 
 #[cfg(target_os = "linux")]
 type OsEvent = sys::XEvent;
@@ -53,6 +63,8 @@ struct TabHandles {
     committed_url: String,
     /// Whether the tab is showing an error page, whose title shouldn't reach history.
     showing_error: bool,
+    /// The browser's own Back and Forward list, for a tab restored with one.
+    history: Option<TabHistory>,
 }
 
 #[derive(Default)]
@@ -65,6 +77,8 @@ pub struct Shell {
     layout: Option<BoxLayout>,
     open_browsers: usize,
     window_closing: bool,
+    /// Identifies this window when a tab is dragged to another one.
+    window_id: u32,
     /// The tab reserved for a popup that CEF is about to create.
     pending_popup: Option<TabId>,
     downloads: DownloadList,
@@ -76,6 +90,17 @@ pub struct Shell {
     /// memory until then, and the address each one will load.
     unloaded: HashMap<TabId, String>,
     find_bar_shown: bool,
+    bookmarks_bar_shown: bool,
+    /// A page's waiting dialog: which tab asked, and how to answer it.
+    dialog: Option<(TabId, JsdialogCallback)>,
+    /// The browser for suggestions and bookmark folder menus, created when first needed.
+    popup_view: Option<BrowserView>,
+    popup: Option<Browser>,
+    popup_overlay: Option<OverlayController>,
+    /// Back and Forward lists for restored tabs waiting to be selected.
+    restored_history: HashMap<TabId, TabHistory>,
+    /// The person agreed to cancel active downloads by closing.
+    close_confirmed: bool,
     find_text: String,
 }
 
@@ -115,6 +140,7 @@ fn saved_data() -> &'static SavedData {
             startup: saved(SETTING_STARTUP)
                 .and_then(|id| StartupMode::from_id(&id))
                 .unwrap_or(defaults.startup),
+            ask_download_location: saved(SETTING_ASK_DOWNLOAD_LOCATION).as_deref() == Some("1"),
         };
         SavedData {
             storage: storage.map(Mutex::new),
@@ -174,6 +200,8 @@ fn open_windows() -> Vec<SharedShell> {
 }
 
 pub fn register_shell(shell: &SharedShell) {
+    static NEXT_WINDOW_ID: AtomicU32 = AtomicU32::new(1);
+    lock(shell).window_id = NEXT_WINDOW_ID.fetch_add(1, Ordering::Relaxed);
     WINDOWS
         .lock()
         .expect("Failed to lock windows")
@@ -183,8 +211,41 @@ pub fn register_shell(shell: &SharedShell) {
 /// Closes every window, which ends the message loop.
 pub fn close_all_browsers() {
     QUITTING.store(true, Ordering::Relaxed);
+    if let Some(shell) = open_windows().into_iter().find(needs_close_confirmation) {
+        ask_to_confirm_close(&shell);
+        return;
+    }
     for shell in open_windows() {
         close_window(&shell);
+    }
+}
+
+fn needs_close_confirmation(shell: &SharedShell) -> bool {
+    let shell = lock(shell);
+    !shell.close_confirmed && shell.downloads.active_count() > 0
+}
+
+fn ask_to_confirm_close(shell: &SharedShell) {
+    let (toolbar, downloads) = {
+        let shell = lock(shell);
+        (shell.toolbar.clone(), shell.downloads.active_count())
+    };
+    send_to_toolbar(toolbar.as_ref(), &UiEvent::ConfirmClose { downloads });
+}
+
+fn resolve_close_confirmation(shell: &SharedShell, close: bool) {
+    if !close {
+        QUITTING.store(false, Ordering::Relaxed);
+        return;
+    }
+    if QUITTING.load(Ordering::Relaxed) {
+        for window in open_windows() {
+            lock(&window).close_confirmed = true;
+        }
+        close_all_browsers();
+    } else {
+        lock(shell).close_confirmed = true;
+        close_window(shell);
     }
 }
 
@@ -205,14 +266,21 @@ fn send_to_toolbar(toolbar: Option<&Browser>, event: &UiEvent) {
 }
 
 fn publish(shell: &SharedShell) {
-    let (toolbar, strip) = {
+    let (toolbar, strip, window_id) = {
         let shell = lock(shell);
         (
             shell.toolbar.clone().filter(|_| shell.toolbar_ready),
             shell.strip.clone(),
+            shell.window_id,
         )
     };
-    send_to_toolbar(toolbar.as_ref(), &UiEvent::Tabs { strip: &strip });
+    send_to_toolbar(
+        toolbar.as_ref(),
+        &UiEvent::Tabs {
+            strip: &strip,
+            window_id,
+        },
+    );
     save_session();
 }
 
@@ -260,6 +328,7 @@ pub fn prepare_tabs(
 ) -> TabId {
     let mut guard = lock(shell);
     let session = session.unwrap_or_default();
+    guard.bookmarks_bar_shown = has_bookmarks_for_bar();
 
     let add = |shell: &mut Shell, url: &str, title: &str| {
         let id = shell.strip.add();
@@ -278,7 +347,20 @@ pub fn prepare_tabs(
     let ids: Vec<TabId> = session
         .tabs
         .iter()
-        .map(|tab| add(&mut guard, &tab.url, &tab.title))
+        .map(|tab| {
+            let id = add(&mut guard, &tab.url, &tab.title);
+            if tab.entries.len() > 1 {
+                let history = TabHistory::new(tab.entries.clone(), tab.index);
+                if let Some(saved) = guard.strip.get_mut(id) {
+                    saved.page.can_go_back = history.can_go_back();
+                    saved.page.can_go_forward = history.can_go_forward();
+                    saved.history_entries = history.entries.clone();
+                    saved.history_index = history.index;
+                }
+                guard.restored_history.insert(id, history);
+            }
+            id
+        })
         .collect();
     if let Some(url) = requested_url {
         return add(&mut guard, url, "");
@@ -301,6 +383,16 @@ pub fn toolbar_height(shell: &SharedShell) -> i32 {
         }
         + if shell.find_bar_shown {
             FIND_BAR_HEIGHT
+        } else {
+            0
+        }
+        + if shell.bookmarks_bar_shown {
+            BOOKMARKS_BAR_HEIGHT
+        } else {
+            0
+        }
+        + if shell.dialog.is_some() {
+            DIALOG_BAR_HEIGHT
         } else {
             0
         }
@@ -407,6 +499,507 @@ fn close_find(shell: &SharedShell, focus_page: bool) {
     }
 }
 
+fn has_bookmarks_for_bar() -> bool {
+    with_storage(|storage| storage.bookmarks("", 1)).is_some_and(|bookmarks| !bookmarks.is_empty())
+}
+
+/// Sends the bookmarks bar to every window, resizing it if the bar appeared or went away.
+fn publish_bookmarks_bar() {
+    let bookmarks =
+        with_storage(|storage| storage.bookmarks("", BOOKMARKS_BAR_LIMIT)).unwrap_or_default();
+    let folders = with_storage(Storage::bookmark_folders).unwrap_or_default();
+    let to_item = |bookmark: &storage::Bookmark| SuggestionItem {
+        url: bookmark.url.clone(),
+        title: bookmark.title.clone(),
+        is_bookmark: false,
+    };
+    let loose: Vec<SuggestionItem> = bookmarks
+        .iter()
+        .filter(|bookmark| bookmark.folder_id.is_none())
+        .map(to_item)
+        .collect();
+    let filed: Vec<FolderItems> = folders
+        .iter()
+        .map(|folder| FolderItems {
+            name: folder.name.clone(),
+            items: bookmarks
+                .iter()
+                .filter(|bookmark| bookmark.folder_id == Some(folder.id))
+                .map(to_item)
+                .collect(),
+        })
+        .collect();
+    let show_bar = !bookmarks.is_empty() || !folders.is_empty();
+    for shell in open_windows() {
+        let (toolbar, resized) = {
+            let mut shell = lock(&shell);
+            let resized = shell.bookmarks_bar_shown != show_bar;
+            shell.bookmarks_bar_shown = show_bar;
+            (
+                shell.toolbar.clone().filter(|_| shell.toolbar_ready),
+                resized,
+            )
+        };
+        send_to_toolbar(
+            toolbar.as_ref(),
+            &UiEvent::BookmarksBar {
+                bookmarks: &loose,
+                folders: &filed,
+            },
+        );
+        if resized {
+            resize_toolbar(&shell);
+        }
+    }
+}
+
+fn suggest(shell: &SharedShell, query: &str) {
+    let items: Vec<SuggestionItem> =
+        with_storage(|storage| storage.suggestions(query, SUGGESTION_LIMIT))
+            .unwrap_or_default()
+            .into_iter()
+            .map(|item| SuggestionItem {
+                url: item.url,
+                title: item.title,
+                is_bookmark: item.is_bookmark,
+            })
+            .collect();
+    let toolbar = lock(shell).toolbar.clone();
+    send_to_toolbar(
+        toolbar.as_ref(),
+        &UiEvent::Suggestions {
+            query,
+            items: &items,
+        },
+    );
+}
+
+fn send_to_popup(popup: Option<&Browser>, contents: &serde_json::Value) {
+    if let Some(frame) = popup.and_then(|popup| popup.main_frame()) {
+        let code = format!("window.onBrowserEvent({contents})");
+        frame.execute_java_script(Some(&CefString::from(code.as_str())), None, 0);
+    }
+}
+
+fn ensure_popup_view(shell: &SharedShell) -> Option<OverlayController> {
+    let (existing, window) = {
+        let shell = lock(shell);
+        (shell.popup_overlay.clone(), shell.window.clone())
+    };
+    if existing.is_some() {
+        return existing;
+    }
+    let window = window?;
+    let mut client = PopupClient::new(shell.clone());
+    let view = browser_view_create(
+        Some(&mut client),
+        Some(&CefString::from(popup_url().as_str())),
+        Some(&BrowserSettings::default()),
+        None,
+        None,
+        Some(&mut PopupViewHost::new()),
+    )?;
+    // Typing stays in the address bar while the menu is showing.
+    View::from(&view).set_focusable(0);
+    let overlay = window.add_overlay_view(Some(&mut View::from(&view)), DockingMode::CUSTOM, 0)?;
+    let mut guard = lock(shell);
+    guard.popup_view = Some(view);
+    guard.popup_overlay = Some(overlay.clone());
+    Some(overlay)
+}
+
+fn show_popup(
+    shell: &SharedShell,
+    left: i32,
+    top: i32,
+    width: i32,
+    height: i32,
+    contents: serde_json::Value,
+) {
+    let Some(overlay) = ensure_popup_view(shell) else {
+        return;
+    };
+    overlay.set_bounds(Some(&Rect {
+        x: left,
+        y: top,
+        width,
+        height,
+    }));
+    overlay.set_visible(1);
+    let popup = lock(shell).popup.clone();
+    send_to_popup(popup.as_ref(), &contents);
+}
+
+fn focus_active_tab(shell: &SharedShell) {
+    let (url, view) = {
+        let shell = lock(shell);
+        let tab = shell.strip.active();
+        let view = tab
+            .and_then(|tab| shell.handles.get(&tab.id))
+            .map(|handles| handles.view.clone());
+        (
+            tab.map(|tab| tab.page.url.clone()).unwrap_or_default(),
+            view,
+        )
+    };
+    if url.is_empty() || url == BLANK_PAGE {
+        focus_address(shell);
+    } else if let Some(view) = view {
+        view.request_focus();
+    }
+}
+
+/// The window became active, perhaps after a page's dialog closed. That leaves keyboard
+/// focus nowhere until something takes it, so shortcuts would stop working.
+pub fn window_activated(shell: &SharedShell) {
+    let toolbar = lock(shell).toolbar.clone();
+    if let Some(toolbar) = toolbar {
+        focus_toolbar(&toolbar);
+    }
+    focus_active_tab(shell);
+}
+
+/// Shows a page's dialog in the toolbar. Only the showing tab may ask, and only one
+/// question at a time. Returns false if this one can't be shown.
+fn show_dialog(
+    shell: &SharedShell,
+    id: TabId,
+    kind: &str,
+    origin: &str,
+    message: &str,
+    default_text: &str,
+    callback: &JsdialogCallback,
+) -> bool {
+    let toolbar = {
+        let mut guard = lock(shell);
+        if guard.dialog.is_some() || guard.strip.active_id() != Some(id) {
+            return false;
+        }
+        guard.dialog = Some((id, callback.clone()));
+        guard.toolbar.clone()
+    };
+    resize_toolbar(shell);
+    let message: String = message.chars().take(DIALOG_MESSAGE_LIMIT).collect();
+    if let Some(toolbar) = toolbar {
+        focus_toolbar(&toolbar);
+        send_to_toolbar(
+            Some(&toolbar),
+            &UiEvent::ShowDialog {
+                kind,
+                origin,
+                message: &message,
+                default_text,
+            },
+        );
+    }
+    true
+}
+
+fn answer_dialog(shell: &SharedShell, accepted: bool, input: &str) {
+    let Some((_, callback)) = lock(shell).dialog.take() else {
+        return;
+    };
+    close_dialog_bar(shell);
+    callback.cont(accepted.into(), Some(&CefString::from(input)));
+    // Staying on a page after "Leave site?" also calls off the window closing.
+    if !accepted {
+        lock(shell).window_closing = false;
+        QUITTING.store(false, Ordering::Relaxed);
+    }
+    focus_active_tab(shell);
+}
+
+fn close_dialog_bar(shell: &SharedShell) {
+    let toolbar = lock(shell).toolbar.clone();
+    send_to_toolbar(toolbar.as_ref(), &UiEvent::HideDialog);
+    resize_toolbar(shell);
+}
+
+fn hide_popup(shell: &SharedShell) {
+    let overlay = lock(shell).popup_overlay.clone();
+    if let Some(overlay) = overlay {
+        overlay.set_visible(0);
+    }
+}
+
+/// Runs a tab's Back or Forward, from its own list if it was restored with one.
+fn go_in_history(shell: &SharedShell, forward: bool) {
+    let target = {
+        let mut guard = lock(shell);
+        let id = guard.strip.active_id();
+        let handles = id.and_then(|id| guard.handles.get_mut(&id));
+        handles
+            .and_then(|handles| handles.history.as_mut())
+            .map(|history| {
+                let url = if forward {
+                    history.go_forward()
+                } else {
+                    history.go_back()
+                };
+                (
+                    url,
+                    history.can_go_back(),
+                    history.can_go_forward(),
+                    history.entries.clone(),
+                    history.index,
+                )
+            })
+    };
+    let Some(page) = active_browser(shell) else {
+        return;
+    };
+    match target {
+        None if forward => page.go_forward(),
+        None => page.go_back(),
+        Some((url, can_back, can_forward, entries, index)) => {
+            let id = lock(shell).strip.active_id();
+            if let Some(id) = id {
+                update_tab(shell, id, |tab| {
+                    tab.page.can_go_back = can_back;
+                    tab.page.can_go_forward = can_forward;
+                    tab.history_entries = entries;
+                    tab.history_index = index;
+                });
+            }
+            if let (Some(url), Some(frame)) = (url, page.main_frame()) {
+                let url = InternalPage::from_address(&url)
+                    .map_or(url.clone(), |page| internal_url(page).to_owned());
+                frame.load_url(Some(&CefString::from(url.as_str())));
+            }
+        }
+    }
+}
+
+wrap_navigation_entry_visitor! {
+    struct CollectEntries {
+        entries: Arc<Mutex<(Vec<String>, usize)>>,
+    }
+
+    impl NavigationEntryVisitor {
+        fn visit(
+            &self,
+            entry: Option<&mut NavigationEntry>,
+            current: i32,
+            _index: i32,
+            _total: i32,
+        ) -> i32 {
+            if let Some(entry) = entry {
+                let url = display_url(&CefString::from(&entry.url()).to_string());
+                let mut saved = self.entries.lock().expect("Failed to lock entries");
+                if current != 0 {
+                    saved.1 = saved.0.len();
+                }
+                saved.0.push(url);
+            }
+            1
+        }
+    }
+}
+
+/// Copies a tab's Back and Forward list, so it can be saved with the session.
+fn capture_history(shell: &SharedShell, id: TabId, browser: &Browser) {
+    let (own_list, _) = {
+        let guard = lock(shell);
+        let handles = guard.handles.get(&id);
+        (handles.and_then(|handles| handles.history.clone()), ())
+    };
+    if let Some(history) = own_list {
+        update_tab(shell, id, |tab| {
+            tab.history_entries = history.entries.clone();
+            tab.history_index = history.index;
+            tab.page.can_go_back = history.can_go_back();
+            tab.page.can_go_forward = history.can_go_forward();
+        });
+        return;
+    }
+    let collected = Arc::new(Mutex::new((Vec::new(), 0)));
+    if let Some(host) = browser.host() {
+        let mut visitor = CollectEntries::new(collected.clone());
+        host.navigation_entries(Some(&mut visitor), 0);
+    }
+    let (entries, index) = collected.lock().expect("Failed to lock entries").clone();
+    update_tab(shell, id, |tab| {
+        tab.history_entries = entries;
+        tab.history_index = index;
+    });
+}
+
+/// Moves a tab to another window, or a new one if no window is given. Its page reloads
+/// there, because a client belongs to one window.
+fn move_tab(source: &SharedShell, id: TabId, target: Option<SharedShell>) {
+    let (moved, tab_count) = {
+        let guard = lock(source);
+        (guard.strip.get(id).cloned(), guard.strip.tabs().len())
+    };
+    let Some(moved) = moved else {
+        return;
+    };
+    // A window's only tab would just become an identical new window.
+    let is_blank = moved.page.url.is_empty() || moved.page.url == BLANK_PAGE;
+    if is_blank || (target.is_none() && tab_count <= 1) {
+        return;
+    }
+    let saved = SessionTab {
+        url: moved.page.url.clone(),
+        title: moved.title.clone(),
+        entries: moved.history_entries.clone(),
+        index: moved.history_index,
+    };
+    match target {
+        Some(target) => {
+            let new_id = add_restored_tab(&target, &saved);
+            select_tab(&target, new_id);
+            let window = lock(&target).window.clone();
+            if let Some(window) = window {
+                window.activate();
+            }
+        }
+        None => open_window(
+            Some(Session {
+                tabs: vec![saved],
+                active: 0,
+            }),
+            None,
+        ),
+    }
+    close_tab(source, id);
+}
+
+fn add_restored_tab(shell: &SharedShell, saved: &SessionTab) -> TabId {
+    let mut guard = lock(shell);
+    let id = guard.strip.add();
+    let is_bookmarked = with_storage(|storage| storage.is_bookmarked(&saved.url)).unwrap_or(false);
+    let history =
+        (saved.entries.len() > 1).then(|| TabHistory::new(saved.entries.clone(), saved.index));
+    if let Some(tab) = guard.strip.get_mut(id) {
+        tab.page.url = saved.url.clone();
+        tab.page.is_bookmarked = is_bookmarked;
+        tab.title = saved.title.clone();
+        if let Some(history) = &history {
+            tab.page.can_go_back = history.can_go_back();
+            tab.page.can_go_forward = history.can_go_forward();
+            tab.history_entries = history.entries.clone();
+            tab.history_index = history.index;
+        }
+    }
+    if let Some(history) = history {
+        guard.restored_history.insert(id, history);
+    }
+    guard.unloaded.insert(id, saved.url.clone());
+    id
+}
+
+/// Opens a downloaded file with its usual app. Risky types only open after the person
+/// has confirmed, and this never runs a file directly.
+fn open_download_file(path: &Path, confirmed: bool) -> bool {
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    if !path.is_file() || (is_risky_file(&name) && !confirmed) {
+        return false;
+    }
+    #[cfg(target_os = "linux")]
+    let mut command = {
+        let mut command = Command::new("xdg-open");
+        command.arg(path);
+        command
+    };
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut command = Command::new("explorer");
+        command.arg(path);
+        command
+    };
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut command = Command::new("open");
+        command.arg(path);
+        command
+    };
+    match command.spawn() {
+        Ok(mut child) => {
+            std::thread::spawn(move || child.wait());
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+fn state_name(state: DownloadState) -> &'static str {
+    match state {
+        DownloadState::Complete => "complete",
+        DownloadState::Cancelled => "cancelled",
+        DownloadState::Failed => "failed",
+        DownloadState::InProgress => "inProgress",
+    }
+}
+
+fn saved_download_json(record: &DownloadRecord) -> serde_json::Value {
+    serde_json::json!({
+        "path": record.path,
+        "fileName": record.file_name,
+        "state": record.state,
+        "receivedBytes": record.received_bytes,
+        "finishedMs": record.finished_ms,
+        "isRisky": is_risky_file(&record.file_name),
+        "exists": Path::new(&record.path).is_file(),
+    })
+}
+
+fn is_saved_download(path: &str) -> bool {
+    with_storage(Storage::downloads)
+        .unwrap_or_default()
+        .iter()
+        .any(|record| record.path == path)
+}
+
+/// Erases cookies and other data websites keep in the browser, then the cache.
+fn clear_site_data(shell: &SharedShell, cookies: bool, cache: bool) {
+    let Some(host) = active_browser(shell).and_then(|browser| browser.host()) else {
+        return;
+    };
+    if cookies {
+        if let Some(manager) = cookie_manager_get_global_manager(None) {
+            manager.delete_cookies(None, None, None);
+        }
+        // Local storage and similar data can only be erased per site, so this covers
+        // the sites in history.
+        let origins: std::collections::BTreeSet<String> =
+            with_storage(|storage| storage.history("", CLEAR_ORIGIN_LIMIT))
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|entry| web_origin(&entry.url))
+                .collect();
+        for origin in origins {
+            if let Some(mut params) = dictionary_value_create() {
+                params.set_string(
+                    Some(&CefString::from("origin")),
+                    Some(&CefString::from(origin.as_str())),
+                );
+                params.set_string(
+                    Some(&CefString::from("storageTypes")),
+                    Some(&CefString::from("all")),
+                );
+                host.execute_dev_tools_method(
+                    0,
+                    Some(&CefString::from("Storage.clearDataForOrigin")),
+                    Some(&mut params),
+                );
+            }
+        }
+    }
+    if cache {
+        host.execute_dev_tools_method(0, Some(&CefString::from("Network.clearBrowserCache")), None);
+    }
+}
+
+fn web_origin(url: &str) -> Option<String> {
+    let (scheme, rest) = url.split_once("://")?;
+    let host = rest.split(['/', '?', '#']).next()?;
+    (!host.is_empty()).then(|| format!("{scheme}://{host}"))
+}
+
 fn downloads_folder() -> PathBuf {
     directories::UserDirs::new()
         .and_then(|dirs| {
@@ -509,7 +1102,9 @@ fn create_view(shell: &SharedShell, id: TabId, url: &str) {
 }
 
 fn store_view(shell: &SharedShell, id: TabId, view: BrowserView) {
-    lock(shell).handles.insert(
+    let mut guard = lock(shell);
+    let history = guard.restored_history.remove(&id);
+    guard.handles.insert(
         id,
         TabHandles {
             view,
@@ -517,6 +1112,7 @@ fn store_view(shell: &SharedShell, id: TabId, view: BrowserView) {
             pending_error: None,
             committed_url: String::new(),
             showing_error: false,
+            history,
         },
     );
 }
@@ -549,6 +1145,13 @@ pub fn set_window(shell: &SharedShell, window: Window, layout: Option<BoxLayout>
 
 /// Shows a tab, hides the others and moves focus to it.
 pub fn select_tab(shell: &SharedShell, id: TabId) {
+    let has_other_dialog = lock(shell)
+        .dialog
+        .as_ref()
+        .is_some_and(|(tab, _)| *tab != id);
+    if has_other_dialog {
+        answer_dialog(shell, false, "");
+    }
     let (should_close_find, unloaded) = {
         let mut shell = lock(shell);
         let closes_find = shell.find_bar_shown && shell.strip.active_id() != Some(id);
@@ -675,6 +1278,11 @@ fn run_command(shell: &SharedShell, command: UiCommand) {
             lock(shell).toolbar_ready = true;
             publish(shell);
             publish_downloads(shell);
+            publish_bookmarks_bar();
+            // The menu starts now, hidden, so it can't take focus while someone types.
+            if let Some(overlay) = ensure_popup_view(shell) {
+                overlay.set_visible(0);
+            }
             // A new window's first tab was shown before its toolbar could take focus.
             let is_blank = lock(shell)
                 .strip
@@ -713,6 +1321,45 @@ fn run_command(shell: &SharedShell, command: UiCommand) {
             again,
         } => run_find(shell, &text, forward, again),
         UiCommand::CloseFind => close_find(shell, true),
+        UiCommand::Suggest { query } => suggest(shell, &query),
+        UiCommand::ShowPopup {
+            left,
+            top,
+            width,
+            height,
+            contents,
+        } => {
+            show_popup(shell, left, top, width, height, contents);
+        }
+        UiCommand::HidePopup => hide_popup(shell),
+        UiCommand::PopupReady => {
+            // Starting the menu's browser takes focus, so put it back.
+            focus_active_tab(shell);
+        }
+        UiCommand::ConfirmClose { close } => resolve_close_confirmation(shell, close),
+        UiCommand::AnswerDialog { accepted, input } => answer_dialog(shell, accepted, &input),
+        UiCommand::TearOffTab { id } => move_tab(shell, id, None),
+        UiCommand::AdoptTab { from_window, id } => {
+            let source = open_windows().into_iter().find(|window| {
+                lock(window).window_id == from_window && !Arc::ptr_eq(window, shell)
+            });
+            if let Some(source) = source {
+                move_tab(&source, id, Some(shell.clone()));
+            }
+        }
+        UiCommand::OpenDownload { id, confirmed } => {
+            let path = {
+                let guard = lock(shell);
+                guard
+                    .downloads
+                    .get(id)
+                    .filter(|item| item.state == DownloadState::Complete)
+                    .map(|item| item.path.clone())
+            };
+            if let Some(path) = path {
+                open_download_file(&path, confirmed);
+            }
+        }
         UiCommand::OpenPage { page } => open_page(shell, page),
         UiCommand::SelectTab { id } => select_tab(shell, id),
         UiCommand::CloseTab { id } => close_tab(shell, id),
@@ -721,15 +1368,16 @@ fn run_command(shell: &SharedShell, command: UiCommand) {
             publish(shell);
         }
         UiCommand::Navigate { input } => navigate(shell, &input),
-        UiCommand::Back | UiCommand::Forward | UiCommand::Reload | UiCommand::Stop => {
+        UiCommand::Back => go_in_history(shell, false),
+        UiCommand::Forward => go_in_history(shell, true),
+        UiCommand::Reload | UiCommand::Stop => {
             let Some(page) = active_browser(shell) else {
                 return;
             };
-            match command {
-                UiCommand::Back => page.go_back(),
-                UiCommand::Forward => page.go_forward(),
-                UiCommand::Reload => page.reload(),
-                _ => page.stop_load(),
+            if command == UiCommand::Reload {
+                page.reload();
+            } else {
+                page.stop_load();
             }
         }
     }
@@ -818,6 +1466,7 @@ fn refresh_bookmark_stars() {
         }
         publish(&shell);
     }
+    publish_bookmarks_bar();
 }
 
 fn run_page_command(shell: &SharedShell, frame: &Frame, command: PageCommand) {
@@ -839,10 +1488,88 @@ fn run_page_command(shell: &SharedShell, frame: &Frame, command: PageCommand) {
             lock(shell).with_storage(Storage::clear_history);
         }
         PageCommand::ListBookmarks { query } => {
-            let items = lock(shell)
-                .with_storage(|storage| storage.bookmarks(&query, PAGE_LIST_LIMIT))
+            let items = with_storage(|storage| storage.bookmarks(&query, PAGE_LIST_LIMIT))
                 .unwrap_or_default();
-            reply(serde_json::json!({ "type": "bookmarks", "items": items }));
+            let folders = with_storage(Storage::bookmark_folders).unwrap_or_default();
+            reply(serde_json::json!({ "type": "bookmarks", "items": items, "folders": folders }));
+        }
+        PageCommand::UpdateBookmark {
+            url,
+            new_url,
+            title,
+            folder_id,
+        } => {
+            // The address came from a form, so it's checked like a typed homepage.
+            let saved = normalize_homepage(&new_url).is_some_and(|new_url| {
+                with_storage(|storage| {
+                    storage.update_bookmark(&url, &new_url, title.trim(), folder_id)
+                })
+                .unwrap_or(false)
+            });
+            reply(serde_json::json!({ "type": "bookmarkSaved", "saved": saved }));
+            refresh_bookmark_stars();
+        }
+        PageCommand::CreateFolder { name } => {
+            if !name.trim().is_empty() {
+                with_storage(|storage| storage.create_bookmark_folder(name.trim()));
+                publish_bookmarks_bar();
+            }
+        }
+        PageCommand::RenameFolder { id, name } => {
+            if !name.trim().is_empty() {
+                with_storage(|storage| storage.rename_bookmark_folder(id, name.trim()));
+                publish_bookmarks_bar();
+            }
+        }
+        PageCommand::DeleteFolder { id } => {
+            with_storage(|storage| storage.delete_bookmark_folder(id));
+            publish_bookmarks_bar();
+        }
+        PageCommand::ListDownloads => {
+            let items: Vec<serde_json::Value> = with_storage(Storage::downloads)
+                .unwrap_or_default()
+                .iter()
+                .map(saved_download_json)
+                .collect();
+            reply(serde_json::json!({ "type": "downloads", "items": items }));
+        }
+        // The page can only name files already in the saved list.
+        PageCommand::OpenSavedDownload { path, confirmed } => {
+            if is_saved_download(&path) {
+                open_download_file(Path::new(&path), confirmed);
+            }
+        }
+        PageCommand::ShowSavedDownload { path } => {
+            if is_saved_download(&path) {
+                show_in_folder(Path::new(&path));
+            }
+        }
+        PageCommand::RemoveSavedDownload { path } => {
+            with_storage(|storage| storage.remove_download(&path));
+        }
+        PageCommand::ClearSavedDownloads => {
+            with_storage(Storage::clear_downloads);
+        }
+        PageCommand::SetAskDownloadLocation { ask } => {
+            settings().ask_download_location = ask;
+            with_storage(|storage| {
+                storage.set_setting(SETTING_ASK_DOWNLOAD_LOCATION, if ask { "1" } else { "0" })
+            });
+        }
+        PageCommand::ClearData {
+            history,
+            cookies,
+            cache,
+            downloads,
+        } => {
+            clear_site_data(shell, cookies, cache);
+            if history {
+                with_storage(Storage::clear_history);
+            }
+            if downloads {
+                with_storage(Storage::clear_downloads);
+            }
+            reply(serde_json::json!({ "type": "dataCleared" }));
         }
         PageCommand::RemoveBookmark { url } => {
             lock(shell).with_storage(|storage| storage.remove_bookmark(&url));
@@ -949,6 +1676,7 @@ fn run_shortcut(shell: &SharedShell, event: &KeyEvent) -> bool {
         Shortcut::Stop if lock(shell).find_bar_shown => close_find(shell, true),
         Shortcut::ToggleBookmark => toggle_bookmark(shell),
         Shortcut::History => open_page(shell, InternalPage::History),
+        Shortcut::Downloads => open_page(shell, InternalPage::Downloads),
         Shortcut::Bookmarks => open_page(shell, InternalPage::Bookmarks),
         Shortcut::Settings => open_page(shell, InternalPage::Settings),
         Shortcut::Quit => close_all_browsers(),
@@ -964,17 +1692,13 @@ fn run_shortcut(shell: &SharedShell, event: &KeyEvent) -> bool {
         Shortcut::LastTab => select(strip.last()),
         // Escape stays with the page and address bar unless there's a load to stop.
         Shortcut::Stop if !strip.active().is_some_and(|tab| tab.page.is_loading) => return false,
-        Shortcut::Back
-        | Shortcut::Forward
-        | Shortcut::Reload
-        | Shortcut::HardReload
-        | Shortcut::Stop => {
+        Shortcut::Back => go_in_history(shell, false),
+        Shortcut::Forward => go_in_history(shell, true),
+        Shortcut::Reload | Shortcut::HardReload | Shortcut::Stop => {
             let Some(page) = page else {
                 return false;
             };
             match shortcut {
-                Shortcut::Back => page.go_back(),
-                Shortcut::Forward => page.go_forward(),
                 Shortcut::Reload => page.reload(),
                 Shortcut::HardReload => page.reload_ignore_cache(),
                 _ => page.stop_load(),
@@ -986,6 +1710,10 @@ fn run_shortcut(shell: &SharedShell, event: &KeyEvent) -> bool {
 
 /// Asks every browser to close for the window closing. Returns whether they all have.
 pub fn try_close_all(shell: &SharedShell) -> bool {
+    if needs_close_confirmation(shell) {
+        ask_to_confirm_close(shell);
+        return false;
+    }
     let (toolbar, pages) = {
         let mut shell = lock(shell);
         shell.window_closing = true;
@@ -994,7 +1722,9 @@ pub fn try_close_all(shell: &SharedShell) -> bool {
             .values()
             .filter_map(|handles| handles.browser.clone())
             .collect();
-        (shell.toolbar.clone(), pages)
+        let mut others: Vec<Browser> = shell.popup.clone().into_iter().collect();
+        others.extend(shell.toolbar.clone());
+        (others, pages)
     };
     // Ask them all, even after one says no, so each starts closing.
     let closed: Vec<bool> = pages
@@ -1010,6 +1740,8 @@ pub fn clear_window(shell: &SharedShell) {
     let mut shell = lock(shell);
     shell.window = None;
     shell.layout = None;
+    shell.popup_overlay = None;
+    shell.popup_view = None;
     for handles in shell.handles.values_mut() {
         handles.browser = None;
     }
@@ -1134,6 +1866,84 @@ wrap_life_span_handler! {
     }
 }
 
+// The menu under the toolbar. It can only navigate and close itself.
+wrap_client! {
+    pub struct PopupClient {
+        shell: SharedShell,
+    }
+
+    impl Client {
+        fn life_span_handler(&self) -> Option<LifeSpanHandler> {
+            Some(PopupLifeSpan::new(self.shell.clone()))
+        }
+
+        fn keyboard_handler(&self) -> Option<KeyboardHandler> {
+            Some(Shortcuts::new(self.shell.clone()))
+        }
+
+        fn request_handler(&self) -> Option<RequestHandler> {
+            Some(ToolbarRequests::new())
+        }
+
+        fn on_process_message_received(
+            &self,
+            _browser: Option<&mut Browser>,
+            _frame: Option<&mut Frame>,
+            _source_process: ProcessId,
+            message: Option<&mut ProcessMessage>,
+        ) -> i32 {
+            let Some(message) = message else {
+                return 0;
+            };
+            if CefString::from(&message.name()).to_string() != UI_COMMAND_MESSAGE {
+                return 0;
+            }
+            let json = message
+                .argument_list()
+                .map(|list| CefString::from(&list.string(0)).to_string())
+                .unwrap_or_default();
+            if let Ok(
+                command @ (UiCommand::Navigate { .. } | UiCommand::HidePopup | UiCommand::PopupReady),
+            ) = serde_json::from_str(&json)
+            {
+                run_command(&self.shell, command);
+            }
+            1
+        }
+    }
+}
+
+wrap_life_span_handler! {
+    struct PopupLifeSpan {
+        shell: SharedShell,
+    }
+
+    impl LifeSpanHandler {
+        fn on_after_created(&self, browser: Option<&mut Browser>) {
+            let mut shell = lock(&self.shell);
+            shell.popup = browser.cloned();
+            shell.open_browsers += 1;
+        }
+
+        fn on_before_close(&self, _browser: Option<&mut Browser>) {
+            lock(&self.shell).popup = None;
+            browser_closed(&self.shell, Some(TabId::MAX));
+        }
+    }
+}
+
+wrap_browser_view_delegate! {
+    struct PopupViewHost {}
+
+    impl ViewDelegate {}
+
+    impl BrowserViewDelegate {
+        fn browser_runtime_style(&self) -> RuntimeStyle {
+            RuntimeStyle::ALLOY
+        }
+    }
+}
+
 wrap_request_handler! {
     struct ToolbarRequests {}
 
@@ -1225,6 +2035,14 @@ wrap_client! {
             Some(PageFind::new(self.shell.clone(), self.id))
         }
 
+        fn jsdialog_handler(&self) -> Option<JsdialogHandler> {
+            Some(PageDialogs::new(self.shell.clone(), self.id))
+        }
+
+        fn focus_handler(&self) -> Option<FocusHandler> {
+            Some(PageFocus::new(self.shell.clone()))
+        }
+
         // Every page can send this message, so the browser process decides who is
         // trusted: only the main frame of a tab committed to an internal page's exact URL.
         fn on_process_message_received(
@@ -1252,6 +2070,94 @@ wrap_client! {
                 run_page_command(&self.shell, frame, command);
             }
             1
+        }
+    }
+}
+
+wrap_jsdialog_handler! {
+    struct PageDialogs {
+        shell: SharedShell,
+        id: TabId,
+    }
+
+    impl JsdialogHandler {
+        fn on_jsdialog(
+            &self,
+            _browser: Option<&mut Browser>,
+            origin_url: Option<&CefString>,
+            dialog_type: JsdialogType,
+            message_text: Option<&CefString>,
+            default_prompt_text: Option<&CefString>,
+            callback: Option<&mut JsdialogCallback>,
+            suppress_message: Option<&mut i32>,
+        ) -> i32 {
+            let kind = match sys::cef_jsdialog_type_t::from(dialog_type) {
+                sys::cef_jsdialog_type_t::JSDIALOGTYPE_CONFIRM => "confirm",
+                sys::cef_jsdialog_type_t::JSDIALOGTYPE_PROMPT => "prompt",
+                _ => "alert",
+            };
+            let text = |value: Option<&CefString>| value.map(CefString::to_string).unwrap_or_default();
+            let shown = callback.is_some_and(|callback| {
+                show_dialog(
+                    &self.shell,
+                    self.id,
+                    kind,
+                    &text(origin_url),
+                    &text(message_text),
+                    &text(default_prompt_text),
+                    callback,
+                )
+            });
+            // A background tab can't interrupt, so its dialog is dropped.
+            if !shown && let Some(suppress) = suppress_message {
+                *suppress = 1;
+            }
+            shown.into()
+        }
+
+        fn on_before_unload_dialog(
+            &self,
+            _browser: Option<&mut Browser>,
+            message_text: Option<&CefString>,
+            _is_reload: i32,
+            callback: Option<&mut JsdialogCallback>,
+        ) -> i32 {
+            let Some(callback) = callback else {
+                return 0;
+            };
+            let message = message_text.map(CefString::to_string).unwrap_or_default();
+            if !show_dialog(&self.shell, self.id, "leave", "", &message, "", callback) {
+                // A background tab can't hold up closing.
+                callback.cont(1, None);
+            }
+            1
+        }
+
+        fn on_reset_dialog_state(&self, _browser: Option<&mut Browser>) {
+            let was_showing = {
+                let mut shell = lock(&self.shell);
+                let is_ours = shell.dialog.as_ref().is_some_and(|(tab, _)| *tab == self.id);
+                if is_ours {
+                    shell.dialog = None;
+                }
+                is_ours
+            };
+            if was_showing {
+                close_dialog_bar(&self.shell);
+            }
+        }
+    }
+}
+
+wrap_focus_handler! {
+    struct PageFocus {
+        shell: SharedShell,
+    }
+
+    impl FocusHandler {
+        fn on_got_focus(&self, _browser: Option<&mut Browser>) {
+            let toolbar = lock(&self.shell).toolbar.clone();
+            send_to_toolbar(toolbar.as_ref(), &UiEvent::PageFocused);
         }
     }
 }
@@ -1317,6 +2223,7 @@ wrap_download_handler! {
             // Chromium retries an interrupted download under the same ID, so keep its
             // entry and path.
             let existing = lock(&self.shell).downloads.get(id).map(|item| item.path.clone());
+            let is_retry = existing.is_some();
             let path = match existing {
                 Some(path) => path,
                 None => {
@@ -1344,11 +2251,14 @@ wrap_download_handler! {
                         received_bytes: item.received_bytes(),
                         total_bytes: item.total_bytes(),
                         bytes_per_second: 0,
+                        is_risky: is_risky_file(&path.to_string_lossy()),
                     });
                     path
                 }
             };
-            callback.cont(Some(&CefString::from(path.to_string_lossy().as_ref())), 0);
+            // Asking only applies to a new download, not to Chromium retrying one.
+            let ask = !is_retry && settings().ask_download_location;
+            callback.cont(Some(&CefString::from(path.to_string_lossy().as_ref())), ask.into());
             publish_downloads(&self.shell);
             hide_blank_download_tab(&self.shell, self.id);
             1
@@ -1375,6 +2285,10 @@ wrap_download_handler! {
             {
                 let mut shell = lock(&self.shell);
                 let id = item.id();
+                let actual_path = CefString::from(&item.full_path()).to_string();
+                if !actual_path.is_empty() {
+                    shell.downloads.set_path(id, PathBuf::from(actual_path));
+                }
                 shell.downloads.update(
                     id,
                     state,
@@ -1392,6 +2306,19 @@ wrap_download_handler! {
                 }
             }
             publish_downloads(&self.shell);
+            if matches!(state, DownloadState::Complete | DownloadState::Failed) {
+                let record = lock(&self.shell).downloads.get(item.id()).map(|item| DownloadRecord {
+                    path: item.path.to_string_lossy().into_owned(),
+                    file_name: item.file_name.clone(),
+                    state: state_name(item.state).to_owned(),
+                    received_bytes: item.received_bytes,
+                    total_bytes: item.total_bytes,
+                    finished_ms: now_ms(),
+                });
+                if let Some(record) = record {
+                    with_storage(|storage| storage.save_download(&record));
+                }
+            }
             if state != DownloadState::InProgress {
                 close_hidden_tab(&self.shell, self.id);
             }
@@ -1467,9 +2394,25 @@ wrap_display_handler! {
                     .with_storage(|storage| storage.is_bookmarked(&url))
                     .unwrap_or(false)
             };
+            let own_list = {
+                let mut shell = lock(&self.shell);
+                shell.handles.get_mut(&self.id).and_then(|handles| {
+                    let history = handles.history.as_mut()?;
+                    if url != BLANK_PAGE {
+                        history.arrived(&url);
+                    }
+                    Some(history.clone())
+                })
+            };
             update_tab(&self.shell, self.id, |tab| {
                 tab.page.url = url;
                 tab.page.is_bookmarked = is_bookmarked;
+                if let Some(history) = own_list {
+                    tab.page.can_go_back = history.can_go_back();
+                    tab.page.can_go_forward = history.can_go_forward();
+                    tab.history_entries = history.entries;
+                    tab.history_index = history.index;
+                }
             });
         }
 
@@ -1589,15 +2532,24 @@ wrap_load_handler! {
             can_go_back: i32,
             can_go_forward: i32,
         ) {
+            if is_loading == 0
+                && let Some(browser) = _browser
+            {
+                capture_history(&self.shell, self.id, &browser.clone());
+            }
             let committed_url = lock(&self.shell)
                 .handles
                 .get(&self.id)
                 .map(|handles| handles.committed_url.clone())
                 .unwrap_or_default();
+            let own_list = lock(&self.shell)
+                .handles
+                .get(&self.id)
+                .and_then(|handles| handles.history.clone());
             update_tab(&self.shell, self.id, |tab| {
                 tab.page.is_loading = is_loading != 0;
-                tab.page.can_go_back = can_go_back != 0;
-                tab.page.can_go_forward = can_go_forward != 0;
+                tab.page.can_go_back = own_list.as_ref().map_or(can_go_back != 0, TabHistory::can_go_back);
+                tab.page.can_go_forward = own_list.as_ref().map_or(can_go_forward != 0, TabHistory::can_go_forward);
                 if is_loading != 0 {
                     tab.page.progress = 0.0;
                 } else {

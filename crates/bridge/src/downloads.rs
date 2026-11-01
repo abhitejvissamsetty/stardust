@@ -23,6 +23,8 @@ pub struct Download {
     /// Negative or zero when the server didn't say.
     pub total_bytes: i64,
     pub bytes_per_second: i64,
+    /// Whether opening this could run code, so the browser asks first.
+    pub is_risky: bool,
 }
 
 /// The downloads shown in the download bar, newest first.
@@ -52,6 +54,24 @@ impl DownloadList {
             item.total_bytes = total;
             item.bytes_per_second = speed;
         }
+    }
+
+    /// Records where a download really went, which changes if the person chose a folder.
+    pub fn set_path(&mut self, id: u32, path: PathBuf) {
+        if let Some(item) = self.items.iter_mut().find(|item| item.id == id) {
+            if let Some(name) = path.file_name() {
+                item.file_name = name.to_string_lossy().into_owned();
+            }
+            item.is_risky = crate::is_risky_file(&item.file_name);
+            item.path = path;
+        }
+    }
+
+    pub fn active_count(&self) -> usize {
+        self.items
+            .iter()
+            .filter(|item| item.state == DownloadState::InProgress)
+            .count()
     }
 
     /// Removes a finished download from the list. The file stays on disk.
@@ -141,6 +161,7 @@ mod tests {
             received_bytes: 0,
             total_bytes: 0,
             bytes_per_second: 0,
+            is_risky: false,
         }
     }
 
@@ -221,6 +242,17 @@ mod tests {
         list.clear_finished();
         assert_eq!(list.items().len(), 1);
         assert_eq!(list.items()[0].id, 1);
+    }
+
+    #[test]
+    fn a_chosen_location_updates_the_name_and_risk() {
+        let mut list = DownloadList::default();
+        list.add(download(1, DownloadState::InProgress));
+        list.set_path(1, PathBuf::from("/chosen/setup.exe"));
+        let item = list.get(1).unwrap();
+        assert_eq!(item.file_name, "setup.exe");
+        assert!(item.is_risky);
+        assert_eq!(list.active_count(), 1);
     }
 
     #[test]

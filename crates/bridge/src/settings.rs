@@ -68,6 +68,7 @@ pub struct Settings {
     pub search_engine: SearchEngine,
     pub homepage: String,
     pub startup: StartupMode,
+    pub ask_download_location: bool,
 }
 
 impl Default for Settings {
@@ -76,6 +77,7 @@ impl Default for Settings {
             search_engine: SearchEngine::default(),
             homepage: DEFAULT_HOMEPAGE.to_owned(),
             startup: StartupMode::default(),
+            ask_download_location: false,
         }
     }
 }
@@ -104,16 +106,23 @@ pub enum InternalPage {
     History,
     Bookmarks,
     Settings,
+    Downloads,
 }
 
 impl InternalPage {
-    pub const ALL: [Self; 3] = [Self::History, Self::Bookmarks, Self::Settings];
+    pub const ALL: [Self; 4] = [
+        Self::History,
+        Self::Bookmarks,
+        Self::Settings,
+        Self::Downloads,
+    ];
 
     pub fn address(self) -> &'static str {
         match self {
             Self::History => "browser://history",
             Self::Bookmarks => "browser://bookmarks",
             Self::Settings => "browser://settings",
+            Self::Downloads => "browser://downloads",
         }
     }
 
@@ -126,19 +135,76 @@ impl InternalPage {
 /// Sent by an internal page. Only those pages can send these, and they can't choose
 /// what happens to the rest of the browser.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum PageCommand {
-    ListHistory { query: String },
-    DeleteHistory { url: String },
+    ListHistory {
+        query: String,
+    },
+    DeleteHistory {
+        url: String,
+    },
     ClearHistory,
-    ListBookmarks { query: String },
-    RemoveBookmark { url: String },
+    ListBookmarks {
+        query: String,
+    },
+    RemoveBookmark {
+        url: String,
+    },
     GetSettings,
-    SetSearchEngine { engine: SearchEngine },
-    SetHomepage { homepage: String },
-    SetStartup { startup: StartupMode },
+    SetSearchEngine {
+        engine: SearchEngine,
+    },
+    SetHomepage {
+        homepage: String,
+    },
+    SetStartup {
+        startup: StartupMode,
+    },
+    SetAskDownloadLocation {
+        ask: bool,
+    },
+    UpdateBookmark {
+        url: String,
+        new_url: String,
+        title: String,
+        folder_id: Option<i64>,
+    },
+    CreateFolder {
+        name: String,
+    },
+    RenameFolder {
+        id: i64,
+        name: String,
+    },
+    DeleteFolder {
+        id: i64,
+    },
+    ListDownloads,
+    OpenSavedDownload {
+        path: String,
+        confirmed: bool,
+    },
+    ShowSavedDownload {
+        path: String,
+    },
+    RemoveSavedDownload {
+        path: String,
+    },
+    ClearSavedDownloads,
+    ClearData {
+        history: bool,
+        cookies: bool,
+        cache: bool,
+        downloads: bool,
+    },
     ListImportSources,
-    Import { source: String },
+    Import {
+        source: String,
+    },
 }
 
 /// Whether a page's URL can be bookmarked or kept in history.
@@ -223,6 +289,20 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<PageCommand>(r#"{"type":"clearHistory"}"#).unwrap(),
             PageCommand::ClearHistory
+        );
+    }
+
+    #[test]
+    fn page_commands_use_javascript_field_names() {
+        let json = r#"{"type":"updateBookmark","url":"a","newUrl":"b","title":"t","folderId":3}"#;
+        assert_eq!(
+            serde_json::from_str::<PageCommand>(json).unwrap(),
+            PageCommand::UpdateBookmark {
+                url: "a".into(),
+                new_url: "b".into(),
+                title: "t".into(),
+                folder_id: Some(3)
+            }
         );
     }
 

@@ -10,6 +10,11 @@ pub struct Tab {
     pub title: String,
     #[serde(flatten)]
     pub page: BrowserState,
+    /// The tab's Back and Forward list, kept up to date for saving.
+    #[serde(skip)]
+    pub history_entries: Vec<String>,
+    #[serde(skip)]
+    pub history_index: usize,
 }
 
 /// The ordered tabs in a window and which one is showing.

@@ -13,6 +13,9 @@ const APP: &str = include_str!("../../../ui/app.js");
 const HISTORY: &str = include_str!("../../../ui/history.html");
 const BOOKMARKS: &str = include_str!("../../../ui/bookmarks.html");
 const SETTINGS: &str = include_str!("../../../ui/settings.html");
+const DOWNLOADS: &str = include_str!("../../../ui/downloads.html");
+const POPUP: &str = include_str!("../../../ui/popup.html");
+const POPUP_JS: &str = include_str!("../../../ui/popup.js");
 const PAGES_CSS: &str = include_str!("../../../ui/pages.css");
 const PAGES_JS: &str = include_str!("../../../ui/pages.js");
 
@@ -22,6 +25,14 @@ pub fn toolbar_url() -> String {
             .replace("/*TOKENS*/", TOKENS)
             .replace("/*TOOLBAR*/", TOOLBAR)
             .replace("/*APP*/", APP),
+    )
+}
+
+pub fn popup_url() -> String {
+    data_url(
+        &POPUP
+            .replace("/*TOKENS*/", TOKENS)
+            .replace("/*SCRIPT*/", POPUP_JS),
     )
 }
 
@@ -40,6 +51,7 @@ fn internal_urls() -> &'static HashMap<InternalPage, String> {
                     InternalPage::History => HISTORY,
                     InternalPage::Bookmarks => BOOKMARKS,
                     InternalPage::Settings => SETTINGS,
+                    InternalPage::Downloads => DOWNLOADS,
                 };
                 let html = html
                     .replace("/*TOKENS*/", TOKENS)
