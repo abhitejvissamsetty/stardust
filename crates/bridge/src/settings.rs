@@ -69,6 +69,8 @@ pub struct Settings {
     pub homepage: String,
     pub startup: StartupMode,
     pub ask_download_location: bool,
+    /// Unload background tabs that haven't been used for a while.
+    pub save_memory: bool,
 }
 
 impl Default for Settings {
@@ -78,6 +80,7 @@ impl Default for Settings {
             homepage: DEFAULT_HOMEPAGE.to_owned(),
             startup: StartupMode::default(),
             ask_download_location: false,
+            save_memory: true,
         }
     }
 }
@@ -166,6 +169,9 @@ pub enum PageCommand {
     },
     SetAskDownloadLocation {
         ask: bool,
+    },
+    SetSaveMemory {
+        enabled: bool,
     },
     UpdateBookmark {
         url: String,

@@ -15,6 +15,9 @@ pub enum Shortcut {
     /// A zero-based tab position.
     TabAt(usize),
     LastTab,
+    /// Moves the active tab one place left or right.
+    MoveTabLeft,
+    MoveTabRight,
     Find,
     FindNext,
     FindPrevious,
@@ -58,6 +61,8 @@ const R: i32 = 0x52;
 const W: i32 = 0x57;
 const F5: i32 = 0x74;
 const F6: i32 = 0x75;
+const PAGE_UP: i32 = 0x21;
+const PAGE_DOWN: i32 = 0x22;
 const OPEN_BRACKET: i32 = 0xDB;
 const CLOSE_BRACKET: i32 = 0xDD;
 
@@ -98,6 +103,8 @@ pub fn shortcut_for(key: KeyPress, is_mac: bool) -> Option<Shortcut> {
             Some(Shortcut::TabAt((key.key_code - KEY_1) as usize))
         }
         (KEY_9, true, false, false) => Some(Shortcut::LastTab),
+        (PAGE_UP, true, true, false) => Some(Shortcut::MoveTabLeft),
+        (PAGE_DOWN, true, true, false) => Some(Shortcut::MoveTabRight),
         _ => None,
     }
 }
@@ -111,6 +118,32 @@ mod tests {
             key_code,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn moving_tabs_by_keyboard() {
+        let ctrl_shift = |key_code| KeyPress {
+            ctrl: true,
+            shift: true,
+            ..press(key_code)
+        };
+        assert_eq!(
+            shortcut_for(ctrl_shift(PAGE_UP), false),
+            Some(Shortcut::MoveTabLeft)
+        );
+        assert_eq!(
+            shortcut_for(ctrl_shift(PAGE_DOWN), false),
+            Some(Shortcut::MoveTabRight)
+        );
+        let command_shift = KeyPress {
+            command: true,
+            shift: true,
+            ..press(PAGE_DOWN)
+        };
+        assert_eq!(
+            shortcut_for(command_shift, true),
+            Some(Shortcut::MoveTabRight)
+        );
     }
 
     #[test]

@@ -1,6 +1,7 @@
 "use strict";
 
-const send = (command) => window.browserBridge.send(JSON.stringify(command));
+// The toolbar opened this menu, and the menu speaks through the toolbar's bridge.
+const send = (command) => window.opener.browserBridge.send(JSON.stringify(command));
 
 // Titles and URLs come from websites, so they're only ever set as text.
 window.onBrowserEvent = (event) => {

@@ -1,18 +1,19 @@
 //! Callbacks for the browsers in the window: the toolbar and one page per tab.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use bridge::{
-    Download, DownloadList, DownloadState, InternalPage, KeyPress, PageCommand, SavedWindows,
-    SearchEngine, Session, SessionTab, Settings, Shortcut, StartupMode, TabHistory, TabId,
-    TabStrip, UiCommand, UiEvent, error_page, is_risky_file, is_web_url, normalize_homepage,
-    resolve_input, safe_file_name, shortcut_for,
+    DISCARD_CHECK_MS, DISCARD_IDLE_MS, DISCARD_LOADED_LIMIT, Download, DownloadList, DownloadState,
+    InternalPage, KeyPress, LoadedTab, PageCommand, SavedWindows, SearchEngine, Session,
+    SessionTab, Settings, Shortcut, StartupMode, TabHistory, TabId, TabStrip, UiCommand, UiEvent,
+    error_page, is_risky_file, is_web_url, normalize_homepage, resolve_input, safe_file_name,
+    shortcut_for,
     storage_types::{FolderItems, SuggestionItem},
-    unique_path,
+    tabs_to_discard, unique_path,
 };
 use cef::*;
 
@@ -22,7 +23,7 @@ use crate::{
     app::open_window,
     data_dir,
     render::UI_COMMAND_MESSAGE,
-    ui::{internal_page_for_url, internal_url, popup_url},
+    ui::{MENU_FRAME_NAME, internal_page_for_url, internal_url},
 };
 
 const ERR_ABORTED: i32 = -3;
@@ -46,6 +47,7 @@ const DIALOG_MESSAGE_LIMIT: usize = 500;
 const SUGGESTION_LIMIT: usize = 6;
 const BOOKMARKS_BAR_LIMIT: u32 = 200;
 const SETTING_ASK_DOWNLOAD_LOCATION: &str = "ask_download_location";
+const SETTING_SAVE_MEMORY: &str = "save_memory";
 const CLEAR_ORIGIN_LIMIT: u32 = 2000;
 
 #[cfg(target_os = "linux")]
@@ -102,6 +104,17 @@ pub struct Shell {
     /// The person agreed to cancel active downloads by closing.
     close_confirmed: bool,
     find_text: String,
+    find_match_case: bool,
+    /// When each tab was last showing, for choosing which to unload.
+    last_shown: HashMap<TabId, i64>,
+    /// Tabs playing sound, which are never unloaded.
+    audible: HashSet<TabId>,
+    /// Tabs whose browser is closing to save memory. They stay in the strip.
+    discarding: HashSet<TabId>,
+    /// Tabs whose page asked before leaving when they were unloaded. They stay loaded.
+    keep_loaded: HashSet<TabId>,
+    /// Tabs from the command line after the first, to load once the window exists.
+    background_loads: Vec<TabId>,
 }
 
 /// Data shared by every window.
@@ -141,6 +154,7 @@ fn saved_data() -> &'static SavedData {
                 .and_then(|id| StartupMode::from_id(&id))
                 .unwrap_or(defaults.startup),
             ask_download_location: saved(SETTING_ASK_DOWNLOAD_LOCATION).as_deref() == Some("1"),
+            save_memory: saved(SETTING_SAVE_MEMORY).as_deref() != Some("0"),
         };
         SavedData {
             storage: storage.map(Mutex::new),
@@ -324,7 +338,7 @@ pub fn startup_windows() -> Vec<Session> {
 pub fn prepare_tabs(
     shell: &SharedShell,
     session: Option<Session>,
-    requested_url: Option<&str>,
+    requested_urls: &[String],
 ) -> TabId {
     let mut guard = lock(shell);
     let session = session.unwrap_or_default();
@@ -362,8 +376,13 @@ pub fn prepare_tabs(
             id
         })
         .collect();
-    if let Some(url) = requested_url {
-        return add(&mut guard, url, "");
+    if let Some((first, rest)) = requested_urls.split_first() {
+        let first = add(&mut guard, first, "");
+        for url in rest {
+            let id = add(&mut guard, url, "");
+            guard.background_loads.push(id);
+        }
+        return first;
     }
     if let Some(id) = ids.get(session.active) {
         return *id;
@@ -455,7 +474,11 @@ fn open_find(shell: &SharedShell) {
 }
 
 fn run_find(shell: &SharedShell, text: &str, forward: bool, again: bool) {
-    lock(shell).find_text = text.to_owned();
+    let match_case = {
+        let mut guard = lock(shell);
+        guard.find_text = text.to_owned();
+        guard.find_match_case
+    };
     let Some(host) = active_browser(shell).and_then(|browser| browser.host()) else {
         return;
     };
@@ -473,7 +496,7 @@ fn run_find(shell: &SharedShell, text: &str, forward: bool, again: bool) {
         host.find(
             Some(&CefString::from(text)),
             forward.into(),
-            0,
+            match_case.into(),
             again.into(),
         );
     }
@@ -582,30 +605,34 @@ fn send_to_popup(popup: Option<&Browser>, contents: &serde_json::Value) {
 }
 
 fn ensure_popup_view(shell: &SharedShell) -> Option<OverlayController> {
-    let (existing, window) = {
+    lock(shell).popup_overlay.clone()
+}
+
+/// Places the menu the toolbar opened as a hidden overlay under the toolbar. Returns
+/// whether it was placed.
+pub fn adopt_menu_view(shell: &SharedShell, view: &BrowserView) -> bool {
+    let window = {
         let shell = lock(shell);
-        (shell.popup_overlay.clone(), shell.window.clone())
+        if shell.popup_view.is_some() {
+            return false;
+        }
+        shell.window.clone()
     };
-    if existing.is_some() {
-        return existing;
-    }
-    let window = window?;
-    let mut client = PopupClient::new(shell.clone());
-    let view = browser_view_create(
-        Some(&mut client),
-        Some(&CefString::from(popup_url().as_str())),
-        Some(&BrowserSettings::default()),
-        None,
-        None,
-        Some(&mut PopupViewHost::new()),
-    )?;
+    let Some(window) = window else {
+        return false;
+    };
     // Typing stays in the address bar while the menu is showing.
-    View::from(&view).set_focusable(0);
-    let overlay = window.add_overlay_view(Some(&mut View::from(&view)), DockingMode::CUSTOM, 0)?;
+    View::from(view).set_focusable(0);
+    let Some(overlay) =
+        window.add_overlay_view(Some(&mut View::from(view)), DockingMode::CUSTOM, 0)
+    else {
+        return false;
+    };
+    overlay.set_visible(0);
     let mut guard = lock(shell);
-    guard.popup_view = Some(view);
-    guard.popup_overlay = Some(overlay.clone());
-    Some(overlay)
+    guard.popup_view = Some(view.clone());
+    guard.popup_overlay = Some(overlay);
+    true
 }
 
 fn show_popup(
@@ -859,7 +886,7 @@ fn move_tab(source: &SharedShell, id: TabId, target: Option<SharedShell>) {
                 tabs: vec![saved],
                 active: 0,
             }),
-            None,
+            &[],
         ),
     }
     close_tab(source, id);
@@ -1104,6 +1131,7 @@ fn create_view(shell: &SharedShell, id: TabId, url: &str) {
 fn store_view(shell: &SharedShell, id: TabId, view: BrowserView) {
     let mut guard = lock(shell);
     let history = guard.restored_history.remove(&id);
+    guard.last_shown.insert(id, now_ms());
     guard.handles.insert(
         id,
         TabHandles {
@@ -1171,9 +1199,15 @@ pub fn select_tab(shell: &SharedShell, id: TabId) {
 
     let (views, window, title, url) = {
         let mut shell = lock(shell);
+        let previous = shell.strip.active_id();
         if !shell.strip.select(id) {
             return;
         }
+        let now = now_ms();
+        if let Some(previous) = previous {
+            shell.last_shown.insert(previous, now);
+        }
+        shell.last_shown.insert(id, now);
         let views: Vec<(TabId, BrowserView)> = shell
             .handles
             .iter()
@@ -1256,6 +1290,10 @@ fn remove_tab(shell: &SharedShell, id: TabId) {
         // Dropping these references is what lets the browser finish closing.
         let view = shell.handles.remove(&id).map(|handles| handles.view);
         shell.strip.remove(id);
+        shell.last_shown.remove(&id);
+        shell.audible.remove(&id);
+        shell.discarding.remove(&id);
+        shell.keep_loaded.remove(&id);
         (shell.window.clone(), view, shell.strip.active_id())
     };
     if let (Some(window), Some(view)) = (window, view) {
@@ -1279,10 +1317,6 @@ fn run_command(shell: &SharedShell, command: UiCommand) {
             publish(shell);
             publish_downloads(shell);
             publish_bookmarks_bar();
-            // The menu starts now, hidden, so it can't take focus while someone types.
-            if let Some(overlay) = ensure_popup_view(shell) {
-                overlay.set_visible(0);
-            }
             // A new window's first tab was shown before its toolbar could take focus.
             let is_blank = lock(shell)
                 .strip
@@ -1319,7 +1353,11 @@ fn run_command(shell: &SharedShell, command: UiCommand) {
             text,
             forward,
             again,
-        } => run_find(shell, &text, forward, again),
+            match_case,
+        } => {
+            lock(shell).find_match_case = match_case;
+            run_find(shell, &text, forward, again);
+        }
         UiCommand::CloseFind => close_find(shell, true),
         UiCommand::Suggest { query } => suggest(shell, &query),
         UiCommand::ShowPopup {
@@ -1333,8 +1371,13 @@ fn run_command(shell: &SharedShell, command: UiCommand) {
         }
         UiCommand::HidePopup => hide_popup(shell),
         UiCommand::PopupReady => {
-            // Starting the menu's browser takes focus, so put it back.
-            focus_active_tab(shell);
+            // The menu's browser takes focus when it starts, and the toolbar opened
+            // it while someone was using the toolbar, so focus goes back there.
+            let toolbar = lock(shell).toolbar.clone();
+            if let Some(toolbar) = toolbar {
+                focus_toolbar(&toolbar);
+                send_to_toolbar(Some(&toolbar), &UiEvent::MenuReady);
+            }
         }
         UiCommand::ConfirmClose { close } => resolve_close_confirmation(shell, close),
         UiCommand::AnswerDialog { accepted, input } => answer_dialog(shell, accepted, &input),
@@ -1550,6 +1593,12 @@ fn run_page_command(shell: &SharedShell, frame: &Frame, command: PageCommand) {
         PageCommand::ClearSavedDownloads => {
             with_storage(Storage::clear_downloads);
         }
+        PageCommand::SetSaveMemory { enabled } => {
+            settings().save_memory = enabled;
+            with_storage(|storage| {
+                storage.set_setting(SETTING_SAVE_MEMORY, if enabled { "1" } else { "0" })
+            });
+        }
         PageCommand::SetAskDownloadLocation { ask } => {
             settings().ask_download_location = ask;
             with_storage(|storage| {
@@ -1680,7 +1729,7 @@ fn run_shortcut(shell: &SharedShell, event: &KeyEvent) -> bool {
         Shortcut::Bookmarks => open_page(shell, InternalPage::Bookmarks),
         Shortcut::Settings => open_page(shell, InternalPage::Settings),
         Shortcut::Quit => close_all_browsers(),
-        Shortcut::NewWindow => open_window(None, Some(BLANK_PAGE)),
+        Shortcut::NewWindow => open_window(None, &[BLANK_PAGE.to_owned()]),
         Shortcut::CloseTab => {
             if let Some(id) = strip.active_id() {
                 close_tab(shell, id);
@@ -1690,6 +1739,15 @@ fn run_shortcut(shell: &SharedShell, event: &KeyEvent) -> bool {
         Shortcut::PreviousTab => select(strip.neighbor(-1)),
         Shortcut::TabAt(index) => select(strip.at(index)),
         Shortcut::LastTab => select(strip.last()),
+        Shortcut::MoveTabLeft | Shortcut::MoveTabRight => {
+            let offset = if shortcut == Shortcut::MoveTabLeft {
+                -1
+            } else {
+                1
+            };
+            lock(shell).strip.move_active(offset);
+            publish(shell);
+        }
         // Escape stays with the page and address bar unless there's a load to stop.
         Shortcut::Stop if !strip.active().is_some_and(|tab| tab.page.is_loading) => return false,
         Shortcut::Back => go_in_history(shell, false),
@@ -1747,11 +1805,21 @@ pub fn clear_window(shell: &SharedShell) {
     }
 }
 
-fn browser_closed(shell: &SharedShell, tab: Option<TabId>) {
+fn browser_closed(shell: &SharedShell, tab: Option<TabId>, closing: Option<&Browser>) {
     let window_closed = {
         let mut shell = lock(shell);
         if let Some(tab) = tab {
-            shell.handles.remove(&tab);
+            // An unloaded tab may already have a new browser by the time the old one
+            // finishes closing, so only the closing browser's handles go.
+            let is_closing_browser = shell
+                .handles
+                .get(&tab)
+                .and_then(|handles| handles.browser.as_ref())
+                .zip(closing)
+                .is_some_and(|(current, closing)| current.is_same(Some(&mut closing.clone())) != 0);
+            if is_closing_browser {
+                shell.handles.remove(&tab);
+            }
         } else {
             shell.toolbar = None;
         }
@@ -1860,8 +1928,40 @@ wrap_life_span_handler! {
             shell.open_browsers += 1;
         }
 
+        // The toolbar may open one window: the menu, with nothing loaded in it. It
+        // starts hidden, so it can't take focus while someone types.
+        fn on_before_popup(
+            &self,
+            _browser: Option<&mut Browser>,
+            _frame: Option<&mut Frame>,
+            _popup_id: i32,
+            target_url: Option<&CefString>,
+            target_frame_name: Option<&CefString>,
+            _target_disposition: WindowOpenDisposition,
+            _user_gesture: i32,
+            _popup_features: Option<&PopupFeatures>,
+            _window_info: Option<&mut WindowInfo>,
+            client: Option<&mut Option<Client>>,
+            _settings: Option<&mut BrowserSettings>,
+            _extra_info: Option<&mut Option<DictionaryValue>>,
+            _no_javascript_access: Option<&mut i32>,
+        ) -> i32 {
+            let url = target_url.map(CefString::to_string).unwrap_or_default();
+            let name = target_frame_name.map(CefString::to_string).unwrap_or_default();
+            let is_menu = name == MENU_FRAME_NAME && (url.is_empty() || url == BLANK_PAGE);
+            let has_menu = {
+                let shell = lock(&self.shell);
+                shell.popup.is_some() || shell.popup_view.is_some()
+            };
+            let Some(client) = client.filter(|_| is_menu && !has_menu) else {
+                return 1;
+            };
+            *client = Some(PopupClient::new(self.shell.clone()));
+            0
+        }
+
         fn on_before_close(&self, _browser: Option<&mut Browser>) {
-            browser_closed(&self.shell, None);
+            browser_closed(&self.shell, None, None);
         }
     }
 }
@@ -1927,19 +2027,7 @@ wrap_life_span_handler! {
 
         fn on_before_close(&self, _browser: Option<&mut Browser>) {
             lock(&self.shell).popup = None;
-            browser_closed(&self.shell, Some(TabId::MAX));
-        }
-    }
-}
-
-wrap_browser_view_delegate! {
-    struct PopupViewHost {}
-
-    impl ViewDelegate {}
-
-    impl BrowserViewDelegate {
-        fn browser_runtime_style(&self) -> RuntimeStyle {
-            RuntimeStyle::ALLOY
+            browser_closed(&self.shell, Some(TabId::MAX), None);
         }
     }
 }
@@ -2043,6 +2131,10 @@ wrap_client! {
             Some(PageFocus::new(self.shell.clone()))
         }
 
+        fn audio_handler(&self) -> Option<AudioHandler> {
+            Some(PageAudio::new(self.shell.clone(), self.id))
+        }
+
         // Every page can send this message, so the browser process decides who is
         // trusted: only the main frame of a tab committed to an internal page's exact URL.
         fn on_process_message_received(
@@ -2125,6 +2217,12 @@ wrap_jsdialog_handler! {
             let Some(callback) = callback else {
                 return 0;
             };
+            // A page that asks before leaving probably has unsaved work, so a tab
+            // being unloaded to save memory stays loaded, without asking.
+            if keep_discarding_tab_loaded(&self.shell, self.id) {
+                callback.cont(0, None);
+                return 1;
+            }
             let message = message_text.map(CefString::to_string).unwrap_or_default();
             if !show_dialog(&self.shell, self.id, "leave", "", &message, "", callback) {
                 // A background tab can't hold up closing.
@@ -2378,6 +2476,19 @@ wrap_display_handler! {
                 return;
             }
             let url = display_url(&url.map(CefString::to_string).unwrap_or_default());
+            let closes_find = {
+                let shell = lock(&self.shell);
+                let previous = shell.handles.get(&self.id).map(|handles| handles.committed_url.as_str());
+                // Matches from the old page mean nothing on a new one. A change of
+                // only the part after # stays on the same page.
+                let page_of = |url: &str| url.split('#').next().unwrap_or_default().to_owned();
+                shell.find_bar_shown
+                    && shell.strip.active_id() == Some(self.id)
+                    && previous.is_some_and(|previous| !previous.is_empty() && page_of(previous) != page_of(&url))
+            };
+            if closes_find {
+                close_find(&self.shell, false);
+            }
             let is_bookmarked = {
                 let mut shell = lock(&self.shell);
                 if let Some(handles) = shell.handles.get_mut(&self.id) {
@@ -2481,6 +2592,7 @@ wrap_life_span_handler! {
             };
             let mut shell = lock(&self.shell);
             let id = shell.strip.add();
+            shell.strip.set_opener(id, self.id);
             shell.pending_popup = Some(id);
             *client = Some(PageClient::new(self.shell.clone(), id));
             0
@@ -2499,6 +2611,10 @@ wrap_life_span_handler! {
             if lock(&self.shell).window_closing {
                 return 0;
             }
+            if lock(&self.shell).discarding.remove(&self.id) {
+                finish_discard(&self.shell, self.id);
+                return 1;
+            }
             let closes_window = {
                 let shell = lock(&self.shell);
                 let tabs = shell.strip.tabs();
@@ -2512,8 +2628,8 @@ wrap_life_span_handler! {
             1
         }
 
-        fn on_before_close(&self, _browser: Option<&mut Browser>) {
-            browser_closed(&self.shell, Some(self.id));
+        fn on_before_close(&self, browser: Option<&mut Browser>) {
+            browser_closed(&self.shell, Some(self.id), browser.map(|browser| &*browser));
         }
     }
 }
@@ -2636,4 +2752,192 @@ wrap_load_handler! {
             frame.execute_java_script(Some(&CefString::from(code.as_str())), None, 0);
         }
     }
+}
+
+wrap_audio_handler! {
+    struct PageAudio {
+        shell: SharedShell,
+        id: TabId,
+    }
+
+    impl AudioHandler {
+        fn on_audio_stream_started(
+            &self,
+            _browser: Option<&mut Browser>,
+            _params: Option<&AudioParameters>,
+            _channels: i32,
+        ) {
+            lock(&self.shell).audible.insert(self.id);
+        }
+
+        fn on_audio_stream_stopped(&self, _browser: Option<&mut Browser>) {
+            lock(&self.shell).audible.remove(&self.id);
+        }
+
+        fn on_audio_stream_error(&self, _browser: Option<&mut Browser>, _message: Option<&CefString>) {
+            lock(&self.shell).audible.remove(&self.id);
+        }
+    }
+}
+
+wrap_task! {
+    struct DiscardCheck;
+
+    impl Task {
+        fn execute(&self) {
+            discard_inactive_tabs();
+            schedule_discard_check();
+        }
+    }
+}
+
+/// Starts checking for tabs to unload. Call once, on the UI thread.
+pub fn schedule_discard_check() {
+    post_delayed_task(
+        ThreadId::UI,
+        Some(&mut DiscardCheck::new()),
+        DISCARD_CHECK_MS,
+    );
+}
+
+/// Unloads background tabs across every window that haven't been used for a while,
+/// or the least recently used ones when too many are loaded.
+fn discard_inactive_tabs() {
+    if !settings().save_memory || QUITTING.load(Ordering::Relaxed) {
+        return;
+    }
+    let windows = open_windows();
+    let mut loaded = Vec::new();
+    for (window, shell) in windows.iter().enumerate() {
+        let shell = lock(shell);
+        if shell.window_closing {
+            continue;
+        }
+        let dialog_tab = shell.dialog.as_ref().map(|(tab, _)| *tab);
+        // A download belongs to the tab that started it and would stop with it, and
+        // which tab that was isn't tracked, so a window with downloads keeps its tabs.
+        let downloading = shell.downloads.active_count() > 0;
+        for tab in shell.strip.tabs() {
+            let has_browser = shell
+                .handles
+                .get(&tab.id)
+                .is_some_and(|handles| handles.browser.is_some());
+            if !has_browser
+                || shell.unloaded.contains_key(&tab.id)
+                || shell.discarding.contains(&tab.id)
+            {
+                continue;
+            }
+            let is_blank = tab.page.url.is_empty() || tab.page.url == BLANK_PAGE;
+            let protected = Some(tab.id) == shell.strip.active_id()
+                || shell.audible.contains(&tab.id)
+                || tab.page.is_loading
+                || Some(tab.id) == dialog_tab
+                || shell.keep_loaded.contains(&tab.id)
+                || downloading
+                || is_blank;
+            loaded.push(LoadedTab {
+                key: (window, tab.id),
+                last_shown_ms: shell
+                    .last_shown
+                    .get(&tab.id)
+                    .copied()
+                    .unwrap_or_else(now_ms),
+                protected,
+            });
+        }
+    }
+    for (window, id) in tabs_to_discard(&loaded, now_ms(), DISCARD_IDLE_MS, DISCARD_LOADED_LIMIT) {
+        discard_tab(&windows[window], id);
+    }
+}
+
+/// Closes a background tab's browser and keeps the tab, ready to load again when
+/// it's selected, like a tab restored at startup.
+fn discard_tab(shell: &SharedShell, id: TabId) {
+    let browser = {
+        let mut guard = lock(shell);
+        let Some(tab) = guard.strip.get(id).cloned() else {
+            return;
+        };
+        let Some(browser) = guard
+            .handles
+            .get(&id)
+            .and_then(|handles| handles.browser.clone())
+        else {
+            return;
+        };
+        if tab.history_entries.len() > 1 {
+            let history = TabHistory::new(tab.history_entries.clone(), tab.history_index);
+            guard.restored_history.insert(id, history);
+        }
+        guard.unloaded.insert(id, tab.page.url.clone());
+        guard.discarding.insert(id);
+        guard.audible.remove(&id);
+        browser
+    };
+    if let Some(host) = browser.host() {
+        // Not forced: a forced close never finishes for a browser in a window's view.
+        // If the page asks before leaving, the tab stays loaded instead.
+        host.close_browser(0);
+    }
+}
+
+/// Called when a page asks before leaving. Returns whether the tab was being unloaded,
+/// in which case it now stays loaded.
+fn keep_discarding_tab_loaded(shell: &SharedShell, id: TabId) -> bool {
+    let mut guard = lock(shell);
+    if !guard.discarding.remove(&id) {
+        return false;
+    }
+    guard.unloaded.remove(&id);
+    guard.restored_history.remove(&id);
+    guard.keep_loaded.insert(id);
+    true
+}
+
+/// Takes an unloaded tab's view out of the window. Its place in the strip stays.
+fn finish_discard(shell: &SharedShell, id: TabId) {
+    let (window, view) = {
+        let mut guard = lock(shell);
+        // As when closing a tab, dropping these references is what lets the browser
+        // finish closing and its renderer process exit.
+        let view = guard.handles.remove(&id).map(|handles| handles.view);
+        (guard.window.clone(), view)
+    };
+    if let (Some(window), Some(view)) = (window, view) {
+        window.remove_child_view(Some(&mut View::from(&view)));
+    }
+    update_tab(shell, id, |tab| {
+        tab.page.is_loading = false;
+        tab.page.progress = 0.0;
+    });
+}
+
+/// Loads the window's other requested tabs without showing them.
+pub fn load_background_tabs(shell: &SharedShell) {
+    let ids = std::mem::take(&mut lock(shell).background_loads);
+    for id in ids {
+        let Some(url) = lock(shell).unloaded.remove(&id) else {
+            continue;
+        };
+        create_view(shell, id, &url);
+        let (window, layout, view) = {
+            let guard = lock(shell);
+            (
+                guard.window.clone(),
+                guard.layout.clone(),
+                guard.handles.get(&id).map(|handles| handles.view.clone()),
+            )
+        };
+        if let (Some(window), Some(view)) = (window, view) {
+            let mut view = View::from(&view);
+            view.set_visible(0);
+            window.add_child_view(Some(&mut view));
+            if let Some(layout) = layout {
+                layout.set_flex_for_view(Some(&mut view), 1);
+            }
+        }
+    }
+    publish(shell);
 }

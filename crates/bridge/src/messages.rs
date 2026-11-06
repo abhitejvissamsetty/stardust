@@ -44,6 +44,8 @@ pub enum UiCommand {
         text: String,
         forward: bool,
         again: bool,
+        #[serde(default)]
+        match_case: bool,
     },
     CloseFind,
     OpenDownload {
@@ -132,6 +134,8 @@ pub enum UiEvent<'a> {
     },
     /// Focuses the address bar without disturbing text already being typed.
     KeepAddressFocus,
+    /// The menu has opened, and the toolbar has focus back.
+    MenuReady,
 }
 
 /// Everything the toolbar shows about the current page.
@@ -193,7 +197,8 @@ mod tests {
             UiCommand::Find {
                 text: "a".into(),
                 forward: false,
-                again: true
+                again: true,
+                match_case: false,
             }
         );
     }

@@ -390,8 +390,11 @@ document.addEventListener("click", () => {
   }
 });
 
+const matchCaseButton = byId("find-match-case");
+
 function runFind(forward, again) {
-  send({ type: "find", text: findInput.value, forward, again });
+  const matchCase = matchCaseButton.getAttribute("aria-pressed") === "true";
+  send({ type: "find", text: findInput.value, forward, again, matchCase });
 }
 
 window.onBrowserEvent = (event) => {
@@ -457,12 +460,19 @@ window.onBrowserEvent = (event) => {
     address.select();
   } else if (event.type === "keepAddressFocus") {
     address.focus();
+  } else if (event.type === "menuReady") {
+    openingMenu = false;
+    focusBeforeMenu?.focus();
+    focusBeforeMenu = null;
   }
 };
 
 // Moving focus to the page leaves this page's focused element in place, so end editing
 // explicitly. Otherwise the address bar wouldn't follow the page.
 window.addEventListener("blur", () => {
+  if (openingMenu) {
+    return;
+  }
   hideSuggestions();
   address.blur();
 });
@@ -486,6 +496,12 @@ findInput.addEventListener("keydown", (event) => {
 byId("find-previous").addEventListener("click", () => runFind(false, true));
 byId("find-next").addEventListener("click", () => runFind(true, true));
 byId("find-close").addEventListener("click", () => send({ type: "closeFind" }));
+matchCaseButton.addEventListener("click", () => {
+  const pressed = matchCaseButton.getAttribute("aria-pressed") !== "true";
+  matchCaseButton.setAttribute("aria-pressed", String(pressed));
+  findInput.focus();
+  runFind(true, false);
+});
 
 byId("dialog-ok").addEventListener("click", () => answerDialog(true));
 byId("dialog-cancel").addEventListener("click", () => answerDialog(false));
@@ -548,6 +564,9 @@ address.addEventListener("click", () => {
   selectOnClick = false;
 });
 address.addEventListener("blur", () => {
+  if (openingMenu) {
+    return;
+  }
   render();
   // Clicking a suggestion moves focus first, so give the click time to arrive.
   setTimeout(() => {
@@ -576,3 +595,31 @@ address.addEventListener("keydown", (event) => {
 });
 
 send({ type: "ready" });
+
+// The menu under the toolbar, for suggestions and bookmark folders. Opening it from
+// here keeps it in this page's process, and the browser shows it as an overlay. A page
+// may only open a window when someone presses a key or clicks, so it opens on the first
+// one, which is also the first time it can be needed.
+const MENU_HTML = /*MENU*/"";
+let menuWindow = null;
+let focusBeforeMenu = null;
+// The new menu takes focus for a moment, which isn't someone leaving the toolbar.
+let openingMenu = false;
+
+function openMenu() {
+  if (menuWindow) {
+    return;
+  }
+  focusBeforeMenu = document.activeElement;
+  openingMenu = true;
+  menuWindow = window.open("", "stardust-menu");
+  if (menuWindow) {
+    menuWindow.document.write(MENU_HTML);
+    menuWindow.document.close();
+  } else {
+    openingMenu = false;
+  }
+}
+
+window.addEventListener("keydown", openMenu, { capture: true });
+window.addEventListener("pointerdown", openMenu, { capture: true });

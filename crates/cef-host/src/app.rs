@@ -5,8 +5,9 @@ use cef::*;
 
 use crate::{
     client::{
-        SharedShell, ToolbarClient, clear_window, prepare_tabs, register_shell, select_tab,
-        set_window, startup_windows, toolbar_height, try_close_all, window_activated,
+        SharedShell, ToolbarClient, adopt_menu_view, clear_window, load_background_tabs,
+        prepare_tabs, register_shell, schedule_discard_check, select_tab, set_window,
+        startup_windows, toolbar_height, try_close_all, window_activated,
     },
     render::BridgeInstaller,
     ui::toolbar_url,
@@ -36,24 +37,39 @@ wrap_browser_process_handler! {
             let command_line = command_line_get_global().expect("Failed to get command line");
             let url = CefString::from(&command_line.switch_value(Some(&CefString::from("url"))))
                 .to_string();
+            let mut arguments = CefStringList::new();
+            command_line.arguments(Some(&mut arguments));
+            let requested = requested_urls(
+                Some(url).into_iter().chain(arguments.into_iter().map(|arg| arg.to_string())),
+            );
 
-            let requested = Some(url.as_str()).filter(|url| !url.is_empty());
             let windows = startup_windows();
             let window_count = windows.len();
             for (index, session) in windows.into_iter().enumerate() {
-                // A requested address opens as a new tab in the last window.
+                // Requested addresses open as new tabs in the last window.
                 let is_last = index + 1 == window_count;
-                open_window(Some(session), requested.filter(|_| is_last));
+                open_window(Some(session), if is_last { &requested } else { &[] });
             }
             if window_count == 0 {
-                open_window(None, requested);
+                open_window(None, &requested);
             }
+            schedule_discard_check();
         }
     }
 }
 
-/// Opens a window. Its tabs load when selected, starting with the first one shown.
-pub fn open_window(session: Option<Session>, requested_url: Option<&str>) {
+/// Addresses given on the command line, like `stardust example.com https://a.org/`.
+/// Only web addresses are opened, so a command line can't reach internal pages.
+fn requested_urls(inputs: impl Iterator<Item = String>) -> Vec<String> {
+    inputs
+        .filter_map(|input| bridge::resolve_input(&input, "search:"))
+        .filter(|url| bridge::is_web_url(url) || url == "about:blank")
+        .collect()
+}
+
+/// Opens a window. Restored tabs load when selected, starting with the first one shown.
+/// Requested addresses open as tabs that load straight away.
+pub fn open_window(session: Option<Session>, requested_urls: &[String]) {
     let shell = SharedShell::default();
     register_shell(&shell);
 
@@ -66,7 +82,7 @@ pub fn open_window(session: Option<Session>, requested_url: Option<&str>) {
         None,
         Some(&mut ToolbarViewHost::new(shell.clone())),
     );
-    let first_tab = prepare_tabs(&shell, session, requested_url);
+    let first_tab = prepare_tabs(&shell, session, requested_urls);
 
     window_create_top_level(Some(&mut WindowHost::new(
         shell,
@@ -86,6 +102,40 @@ wrap_browser_view_delegate! {
             Size { width: 1280, height: toolbar_height(&self.shell) }
         }
     }
+
+    impl BrowserViewDelegate {
+        fn browser_runtime_style(&self) -> RuntimeStyle {
+            RuntimeStyle::ALLOY
+        }
+
+        fn delegate_for_popup_browser_view(
+            &self,
+            _browser_view: Option<&mut BrowserView>,
+            _settings: Option<&BrowserSettings>,
+            _client: Option<&mut Client>,
+            _is_devtools: i32,
+        ) -> Option<BrowserViewDelegate> {
+            Some(MenuViewHost::new())
+        }
+
+        // The only window the toolbar may open is its menu.
+        fn on_popup_browser_view_created(
+            &self,
+            _browser_view: Option<&mut BrowserView>,
+            popup_browser_view: Option<&mut BrowserView>,
+            _is_devtools: i32,
+        ) -> i32 {
+            popup_browser_view
+                .is_some_and(|view| adopt_menu_view(&self.shell, view))
+                .into()
+        }
+    }
+}
+
+wrap_browser_view_delegate! {
+    struct MenuViewHost {}
+
+    impl ViewDelegate {}
 
     impl BrowserViewDelegate {
         fn browser_runtime_style(&self) -> RuntimeStyle {
@@ -124,6 +174,7 @@ wrap_window_delegate! {
             window.add_child_view(Some(&mut View::from(toolbar)));
             set_window(&self.shell, window.clone(), layout);
             select_tab(&self.shell, self.first_tab);
+            load_background_tabs(&self.shell);
             window.show();
         }
 

@@ -2,6 +2,7 @@
 //! Rust, address bar parsing, keyboard shortcuts and the error page.
 
 mod address;
+mod discard;
 mod downloads;
 mod error_page;
 mod history;
@@ -13,6 +14,9 @@ pub mod storage_types;
 mod tabs;
 
 pub use address::resolve_input;
+pub use discard::{
+    DISCARD_CHECK_MS, DISCARD_IDLE_MS, DISCARD_LOADED_LIMIT, LoadedTab, tabs_to_discard,
+};
 pub use downloads::{Download, DownloadList, DownloadState, safe_file_name, unique_path};
 pub use error_page::error_page;
 pub use history::{TabHistory, is_risky_file};

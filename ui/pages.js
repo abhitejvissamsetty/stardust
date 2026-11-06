@@ -226,6 +226,7 @@ window.onBrowserEvent = (event) => {
     byId("engine").value = event.settings.searchEngine;
     byId("startup").value = event.settings.startup;
     byId("ask-download").checked = event.settings.askDownloadLocation;
+    byId("save-memory").checked = event.settings.saveMemory;
     if (document.activeElement !== byId("homepage")) {
       byId("homepage").value = event.settings.homepage;
     }
@@ -263,6 +264,9 @@ if (page === "settings") {
   send({ type: "listImportSources" });
   byId("ask-download").addEventListener("change", (event) => {
     send({ type: "setAskDownloadLocation", ask: event.target.checked });
+  });
+  byId("save-memory").addEventListener("change", (event) => {
+    send({ type: "setSaveMemory", enabled: event.target.checked });
   });
   byId("clear-data").addEventListener("click", () => {
     send({

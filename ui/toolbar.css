@@ -389,6 +389,17 @@ svg {
   outline-color: var(--danger);
 }
 
+.match-case {
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.match-case[aria-pressed="true"] {
+  background: var(--press);
+  color: var(--accent);
+}
+
 .find-count {
   color: var(--text-muted);
   font-size: var(--text-sm);

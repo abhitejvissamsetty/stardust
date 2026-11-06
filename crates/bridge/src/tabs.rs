@@ -15,6 +15,10 @@ pub struct Tab {
     pub history_entries: Vec<String>,
     #[serde(skip)]
     pub history_index: usize,
+    /// The tab this one was opened from, shown again when this one closes. It's
+    /// forgotten once the person switches away, as other browsers do.
+    #[serde(skip)]
+    pub opener: Option<TabId>,
 }
 
 /// The ordered tabs in a window and which one is showing.
@@ -70,20 +74,44 @@ impl TabStrip {
     pub fn select(&mut self, id: TabId) -> bool {
         let exists = self.get(id).is_some();
         if exists {
+            if let Some(previous) = self.active_id.filter(|previous| *previous != id)
+                && let Some(tab) = self.get_mut(previous)
+            {
+                tab.opener = None;
+            }
             self.active_id = Some(id);
         }
         exists
     }
 
-    /// Removes a tab. If it was showing, its right neighbor shows next, or else its left.
+    /// Records which tab opened another.
+    pub fn set_opener(&mut self, id: TabId, opener: TabId) {
+        if let Some(tab) = self.get_mut(id) {
+            tab.opener = Some(opener);
+        }
+    }
+
+    /// Removes a tab. If it was showing, the tab that opened it shows next, or else its
+    /// right neighbor, or else its left.
     pub fn remove(&mut self, id: TabId) {
         let Some(index) = self.index_of(id) else {
             return;
         };
-        self.tabs.remove(index);
+        let removed = self.tabs.remove(index);
+        for tab in &mut self.tabs {
+            if tab.opener == Some(id) {
+                tab.opener = None;
+            }
+        }
         if self.active_id == Some(id) {
-            let next = self.tabs.get(index).or_else(|| self.tabs.last());
-            self.active_id = next.map(|tab| tab.id);
+            let opener = removed.opener.filter(|opener| self.get(*opener).is_some());
+            let next = opener.or_else(|| {
+                self.tabs
+                    .get(index)
+                    .or_else(|| self.tabs.last())
+                    .map(|tab| tab.id)
+            });
+            self.active_id = next;
         }
     }
 
@@ -108,6 +136,17 @@ impl TabStrip {
         if let Some(from) = self.index_of(id) {
             let tab = self.tabs.remove(from);
             self.tabs.insert(index.min(self.tabs.len()), tab);
+        }
+    }
+
+    /// Moves the active tab `offset` places, stopping at either end.
+    pub fn move_active(&mut self, offset: i32) {
+        let Some(id) = self.active_id else {
+            return;
+        };
+        if let Some(index) = self.index_of(id) {
+            let target = (index as i32 + offset).max(0) as usize;
+            self.move_to(id, target);
         }
     }
 
@@ -198,6 +237,54 @@ mod tests {
         strip.move_to(1, 0);
         assert_eq!(order(&strip), vec![1, 2, 3]);
         assert_eq!(strip.active_id(), Some(3));
+    }
+
+    #[test]
+    fn closing_an_opened_tab_returns_to_its_opener() {
+        let mut strip = strip_of_three();
+        strip.select(1);
+        let opened = strip.add();
+        strip.set_opener(opened, 1);
+        strip.select(opened);
+        strip.remove(opened);
+        assert_eq!(strip.active_id(), Some(1));
+    }
+
+    #[test]
+    fn switching_away_forgets_the_opener() {
+        let mut strip = strip_of_three();
+        strip.select(1);
+        let opened = strip.add();
+        strip.set_opener(opened, 1);
+        strip.select(opened);
+        strip.select(3);
+        strip.select(opened);
+        strip.remove(opened);
+        // The right neighbor of the opened tab, which sat between 1 and 2.
+        assert_eq!(strip.active_id(), Some(2));
+    }
+
+    #[test]
+    fn a_closed_opener_is_forgotten() {
+        let mut strip = strip_of_three();
+        strip.select(1);
+        let opened = strip.add();
+        strip.set_opener(opened, 1);
+        strip.remove(1);
+        strip.select(opened);
+        strip.remove(opened);
+        assert_eq!(strip.active_id(), Some(2));
+    }
+
+    #[test]
+    fn moving_the_active_tab_stops_at_the_ends() {
+        let mut strip = strip_of_three();
+        strip.move_active(1);
+        assert_eq!(order(&strip), vec![1, 2, 3]);
+        strip.move_active(-1);
+        assert_eq!(order(&strip), vec![1, 3, 2]);
+        strip.move_active(-5);
+        assert_eq!(order(&strip), vec![3, 1, 2]);
     }
 
     #[test]

@@ -19,21 +19,29 @@ const POPUP_JS: &str = include_str!("../../../ui/popup.js");
 const PAGES_CSS: &str = include_str!("../../../ui/pages.css");
 const PAGES_JS: &str = include_str!("../../../ui/pages.js");
 
+/// The window name the toolbar gives the menu it opens.
+pub const MENU_FRAME_NAME: &str = "stardust-menu";
+
+/// The toolbar page, which carries the menu's page so it can open the menu itself.
+/// Opened that way, the menu shares the toolbar's renderer process instead of
+/// starting one of its own.
 pub fn toolbar_url() -> String {
+    let menu = serde_json::to_string(&menu_html())
+        .expect("Failed to encode the menu")
+        // The menu has its own `</script>`, which would end the toolbar's script early.
+        .replace("</", "<\\/");
     data_url(
         &INDEX
             .replace("/*TOKENS*/", TOKENS)
             .replace("/*TOOLBAR*/", TOOLBAR)
-            .replace("/*APP*/", APP),
+            .replace("/*APP*/", &APP.replace("/*MENU*/\"\"", &menu)),
     )
 }
 
-pub fn popup_url() -> String {
-    data_url(
-        &POPUP
-            .replace("/*TOKENS*/", TOKENS)
-            .replace("/*SCRIPT*/", POPUP_JS),
-    )
+fn menu_html() -> String {
+    POPUP
+        .replace("/*TOKENS*/", TOKENS)
+        .replace("/*SCRIPT*/", POPUP_JS)
 }
 
 fn data_url(html: &str) -> String {
