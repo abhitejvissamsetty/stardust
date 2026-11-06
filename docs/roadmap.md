@@ -1,6 +1,6 @@
 # Roadmap
 
-**Draft.** The original plan isn't in the repo. This scope for Milestones 3 and 4 is drawn from what the Milestone 0 to 2 docs leave for later.
+**Draft.** The original plan isn't in the repo. This scope for Milestones 3 and 4 is drawn from what the Milestone 0 to 2 docs leave for later. What's still open is in [remaining-work.md](remaining-work.md).
 
 ## Where things stand
 

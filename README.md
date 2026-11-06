@@ -4,7 +4,7 @@ By Ambiqa. An open-source, lightweight browser written in Rust on top of Chromiu
 [Chromium Embedded Framework](https://github.com/chromiumembedded/cef) and
 [`cef-rs`](https://github.com/tauri-apps/cef-rs).
 
-**Status: early prototype.** It has tabs, windows, downloads, bookmarks, history, settings, find-in-page, session restore, import, saved passwords, permission prompts and signed updates. It has been run on Linux and macOS; Windows code exists but has never been run. See the results for [Milestone 0](docs/milestone-0.md), [1](docs/milestone-1.md), [2](docs/milestone-2.md), [3](docs/milestone-3.md) and [4](docs/milestone-4.md), and the [roadmap](docs/roadmap.md).
+**Status: early prototype.** It has tabs, windows, downloads, bookmarks, history, settings, find-in-page, session restore, import, saved passwords, permission prompts and signed updates. It has been run on Linux and macOS; Windows code exists but has never been run. See the results for [Milestone 0](docs/milestone-0.md), [1](docs/milestone-1.md), [2](docs/milestone-2.md), [3](docs/milestone-3.md) and [4](docs/milestone-4.md), the [roadmap](docs/roadmap.md), and what's [left to do](docs/remaining-work.md).
 Don't use it for logins or banking yet: it can update itself, but there's no release server, so it won't receive security fixes.
 
 ## Build and run
@@ -28,6 +28,7 @@ cargo xtask bundle --release
 - `ui`: the toolbar page and [design tokens](docs/design.md)
 - `xtask`: builds the bundle in `dist/`, and makes signed releases ([how](docs/milestone-4.md#making-a-release))
 - `scripts/measure.sh`: measures RAM and CPU on a page
+- `scripts/cdp.py`: drives a running browser for testing, through Chromium's debugging protocol
 
 ## License
 
