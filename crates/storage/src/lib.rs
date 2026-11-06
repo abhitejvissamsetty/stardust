@@ -7,7 +7,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 pub use rusqlite::Result;
 use serde::Serialize;
 
-const MIGRATIONS: [&str; 2] = [
+const MIGRATIONS: [&str; 3] = [
     "
     CREATE TABLE bookmarks (
         url TEXT PRIMARY KEY,
@@ -41,12 +41,34 @@ const MIGRATIONS: [&str; 2] = [
         finished_ms INTEGER NOT NULL
     );
 ",
+    // Saved logins. The passwords themselves are in the system's password store.
+    "
+    CREATE TABLE logins (
+        origin TEXT NOT NULL,
+        username TEXT NOT NULL,
+        created_ms INTEGER NOT NULL,
+        used_ms INTEGER NOT NULL,
+        PRIMARY KEY (origin, username)
+    );
+    CREATE TABLE never_save_logins (
+        origin TEXT PRIMARY KEY
+    );
+",
 ];
 
 /// How many saved downloads to show after a restart.
 const DOWNLOAD_RECORD_LIMIT: u32 = 50;
 /// How many matches of each kind to consider when ranking suggestions.
 const SUGGESTION_CANDIDATES: u32 = 200;
+
+/// A saved login, without its password.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Login {
+    pub origin: String,
+    pub username: String,
+    pub used_ms: i64,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -431,6 +453,73 @@ impl Storage {
         Ok(())
     }
 
+    /// Records a saved login, or marks an existing one as just used.
+    pub fn save_login(&self, origin: &str, username: &str, now_ms: i64) -> Result<()> {
+        self.connection.execute(
+            "INSERT INTO logins (origin, username, created_ms, used_ms) VALUES (?1, ?2, ?3, ?3)
+             ON CONFLICT (origin, username) DO UPDATE SET used_ms = excluded.used_ms",
+            params![origin, username, now_ms],
+        )?;
+        Ok(())
+    }
+
+    /// One site's logins, most recently used first. Every site's with `None`.
+    pub fn logins(&self, origin: Option<&str>) -> Result<Vec<Login>> {
+        let mut statement = self.connection.prepare(
+            "SELECT origin, username, used_ms FROM logins
+             WHERE ?1 IS NULL OR origin = ?1
+             ORDER BY used_ms DESC, origin, username",
+        )?;
+        statement
+            .query_map([origin], |row| {
+                Ok(Login {
+                    origin: row.get(0)?,
+                    username: row.get(1)?,
+                    used_ms: row.get(2)?,
+                })
+            })?
+            .collect()
+    }
+
+    pub fn delete_login(&self, origin: &str, username: &str) -> Result<()> {
+        self.connection.execute(
+            "DELETE FROM logins WHERE origin = ?1 AND username = ?2",
+            params![origin, username],
+        )?;
+        Ok(())
+    }
+
+    pub fn set_never_save_login(&self, origin: &str, never: bool) -> Result<()> {
+        if never {
+            self.connection.execute(
+                "INSERT OR IGNORE INTO never_save_logins (origin) VALUES (?1)",
+                [origin],
+            )?;
+        } else {
+            self.connection
+                .execute("DELETE FROM never_save_logins WHERE origin = ?1", [origin])?;
+        }
+        Ok(())
+    }
+
+    pub fn never_saves_logins(&self, origin: &str) -> Result<bool> {
+        self.connection
+            .query_row(
+                "SELECT 1 FROM never_save_logins WHERE origin = ?1",
+                [origin],
+                |_| Ok(()),
+            )
+            .optional()
+            .map(|found| found.is_some())
+    }
+
+    pub fn never_save_login_sites(&self) -> Result<Vec<String>> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT origin FROM never_save_logins ORDER BY origin")?;
+        statement.query_map([], |row| row.get(0))?.collect()
+    }
+
     pub fn setting(&self, key: &str) -> Result<Option<String>> {
         self.connection
             .query_row("SELECT value FROM settings WHERE key = ?1", [key], |row| {
@@ -487,6 +576,51 @@ mod tests {
 
     fn storage() -> Storage {
         Storage::open_in_memory().unwrap()
+    }
+
+    #[test]
+    fn logins_are_saved_listed_and_removed() {
+        let storage = storage();
+        storage.save_login("https://a.example", "ann", 1).unwrap();
+        storage.save_login("https://a.example", "bob", 2).unwrap();
+        storage.save_login("https://b.example", "cat", 3).unwrap();
+        let a = storage.logins(Some("https://a.example")).unwrap();
+        assert_eq!(
+            a.iter()
+                .map(|login| login.username.as_str())
+                .collect::<Vec<_>>(),
+            ["bob", "ann"]
+        );
+        // Using a login moves it first.
+        storage.save_login("https://a.example", "ann", 4).unwrap();
+        assert_eq!(
+            storage.logins(Some("https://a.example")).unwrap()[0].username,
+            "ann"
+        );
+        assert_eq!(storage.logins(None).unwrap().len(), 3);
+        storage.delete_login("https://a.example", "ann").unwrap();
+        assert_eq!(storage.logins(Some("https://a.example")).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn sites_can_be_told_never_to_save() {
+        let storage = storage();
+        assert!(!storage.never_saves_logins("https://a.example").unwrap());
+        storage
+            .set_never_save_login("https://a.example", true)
+            .unwrap();
+        storage
+            .set_never_save_login("https://a.example", true)
+            .unwrap();
+        assert!(storage.never_saves_logins("https://a.example").unwrap());
+        assert_eq!(
+            storage.never_save_login_sites().unwrap(),
+            ["https://a.example"]
+        );
+        storage
+            .set_never_save_login("https://a.example", false)
+            .unwrap();
+        assert!(!storage.never_saves_logins("https://a.example").unwrap());
     }
 
     #[test]

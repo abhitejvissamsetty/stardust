@@ -248,6 +248,69 @@ window.onBrowserEvent = (event) => {
     byId("import").disabled = false;
     byId("import-hint").textContent =
       `Added ${event.bookmarks} bookmarks and ${event.history} history entries.`;
+  } else if (event.type === "logins") {
+    const row = (text, label, command) => {
+      const element = document.createElement("div");
+      element.className = "toolbar-row";
+      const span = document.createElement("span");
+      span.textContent = text;
+      const button = document.createElement("button");
+      button.className = "quiet-button";
+      button.textContent = label;
+      button.addEventListener("click", () => send(command));
+      element.append(span, button);
+      return element;
+    };
+    const logins = event.logins.map((login) =>
+      row(`${login.origin} — ${login.username || "(no username)"}`, "Remove", {
+        type: "deleteLogin",
+        origin: login.origin,
+        username: login.username,
+      }),
+    );
+    byId("logins").replaceChildren(...logins);
+    byId("logins-hint").hidden = logins.length > 0;
+    const never = event.neverSave.map((origin) =>
+      row(`Never saved: ${origin}`, "Allow saving", { type: "forgetNeverSaveLogin", origin }),
+    );
+    byId("never-save").replaceChildren(...never);
+  } else if (event.type === "sitePermissions") {
+    const names = { camera: "Camera", microphone: "Microphone", location: "Location" };
+    const rows = Object.entries(event.sites).map(([site, decisions]) => {
+      const row = document.createElement("div");
+      row.className = "toolbar-row";
+      const text = document.createElement("span");
+      const summary = Object.entries(decisions)
+        .map(([permission, decision]) => `${names[permission] ?? permission}: ${decision === "allow" ? "allowed" : "blocked"}`)
+        .join(", ");
+      text.textContent = `${site} — ${summary}`;
+      const forget = document.createElement("button");
+      forget.className = "quiet-button";
+      forget.textContent = "Reset";
+      forget.addEventListener("click", () => send({ type: "forgetSitePermissions", site }));
+      row.append(text, forget);
+      return row;
+    });
+    byId("site-permissions").replaceChildren(...rows);
+    byId("site-permissions-hint").hidden = rows.length > 0;
+  } else if (event.type === "updateStatus") {
+    const status = event.status;
+    const messages = {
+      off: "Updates aren't set up in this build.",
+      idle: "Updates are checked automatically.",
+      checking: "Checking for updates…",
+      upToDate: "Stardust is up to date.",
+      downloading: `Downloading version ${status.version}…`,
+      ready: `Version ${status.version} is ready. It installs when Stardust restarts.`,
+      failed: `Couldn't update: ${status.message}`,
+    };
+    byId("update-status").textContent = `Version ${event.version}. ${messages[status.state] ?? ""}`;
+    byId("check-updates").hidden = status.state === "off";
+    byId("check-updates").disabled = status.state === "checking" || status.state === "downloading";
+    byId("restart-update").hidden = status.state !== "ready";
+    if (status.state === "checking" || status.state === "downloading") {
+      setTimeout(() => send({ type: "getUpdateStatus" }), 1000);
+    }
   } else if (event.type === "homepageResult") {
     const hint = byId("homepage-hint");
     hint.classList.toggle("error", !event.saved);
@@ -262,6 +325,14 @@ if (page === "settings") {
     send({ type: "setSearchEngine", engine: event.target.value });
   });
   send({ type: "listImportSources" });
+  send({ type: "getUpdateStatus" });
+  send({ type: "listSitePermissions" });
+  send({ type: "listLogins" });
+  byId("check-updates").addEventListener("click", () => {
+    send({ type: "checkForUpdates" });
+    setTimeout(() => send({ type: "getUpdateStatus" }), 300);
+  });
+  byId("restart-update").addEventListener("click", () => send({ type: "restartToUpdate" }));
   byId("ask-download").addEventListener("change", (event) => {
     send({ type: "setAskDownloadLocation", ask: event.target.checked });
   });

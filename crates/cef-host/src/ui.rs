@@ -25,7 +25,12 @@ pub const MENU_FRAME_NAME: &str = "stardust-menu";
 /// The toolbar page, which carries the menu's page so it can open the menu itself.
 /// Opened that way, the menu shares the toolbar's renderer process instead of
 /// starting one of its own.
-pub fn toolbar_url() -> String {
+pub fn toolbar_url() -> &'static str {
+    static URL: OnceLock<String> = OnceLock::new();
+    URL.get_or_init(build_toolbar_url)
+}
+
+fn build_toolbar_url() -> String {
     let menu = serde_json::to_string(&menu_html())
         .expect("Failed to encode the menu")
         // The menu has its own `</script>`, which would end the toolbar's script early.

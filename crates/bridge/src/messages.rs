@@ -86,6 +86,8 @@ pub enum UiCommand {
     OpenPage {
         page: InternalPage,
     },
+    /// Fills the page's most recently used saved login.
+    FillLogin,
 }
 
 /// Sent to the toolbar page.
@@ -148,6 +150,8 @@ pub struct BrowserState {
     pub can_go_forward: bool,
     pub progress: f64,
     pub is_bookmarked: bool,
+    /// The page's site has saved logins, so the toolbar offers to fill one.
+    pub has_logins: bool,
 }
 
 #[cfg(test)]

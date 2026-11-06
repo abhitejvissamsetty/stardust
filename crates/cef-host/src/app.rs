@@ -24,6 +24,25 @@ wrap_app! {
         fn render_process_handler(&self) -> Option<RenderProcessHandler> {
             Some(BridgeInstaller::new())
         }
+
+        // On Linux, video decodes on the GPU only with VA-API turned on, which helps
+        // where a driver is installed. Other systems do it by default.
+        fn on_before_command_line_processing(
+            &self,
+            process_type: Option<&CefString>,
+            command_line: Option<&mut CommandLine>,
+        ) {
+            let is_browser = process_type.is_none_or(|kind| kind.to_string().is_empty());
+            if let (true, true, Some(command_line)) = (cfg!(target_os = "linux"), is_browser, command_line) {
+                let drivers = std::env::var("LIBVA_DRIVERS_PATH").ok();
+                if bridge::has_vaapi_driver(&bridge::vaapi_driver_folders(drivers.as_deref())) {
+                    let name = CefString::from("enable-features");
+                    let existing = CefString::from(&command_line.switch_value(Some(&name))).to_string();
+                    let features = bridge::add_features(&existing, &bridge::VAAPI_FEATURES);
+                    command_line.append_switch_with_value(Some(&name), Some(&CefString::from(features.as_str())));
+                }
+            }
+        }
     }
 }
 
@@ -54,6 +73,11 @@ wrap_browser_process_handler! {
                 open_window(None, &requested);
             }
             schedule_discard_check();
+            let update_url = CefString::from(
+                &command_line.switch_value(Some(&CefString::from("update-url"))),
+            )
+            .to_string();
+            crate::updates::start(Some(update_url).filter(|url| !url.is_empty()));
         }
     }
 }
@@ -76,7 +100,7 @@ pub fn open_window(session: Option<Session>, requested_urls: &[String]) {
     let mut toolbar_client = ToolbarClient::new(shell.clone());
     let toolbar = browser_view_create(
         Some(&mut toolbar_client),
-        Some(&CefString::from(toolbar_url().as_str())),
+        Some(&CefString::from(toolbar_url())),
         Some(&BrowserSettings::default()),
         None,
         None,

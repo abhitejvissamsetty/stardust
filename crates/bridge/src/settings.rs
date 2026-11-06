@@ -211,6 +211,22 @@ pub enum PageCommand {
     Import {
         source: String,
     },
+    ListLogins,
+    DeleteLogin {
+        origin: String,
+        username: String,
+    },
+    ForgetNeverSaveLogin {
+        origin: String,
+    },
+    ListSitePermissions,
+    ForgetSitePermissions {
+        site: String,
+    },
+    GetUpdateStatus,
+    CheckForUpdates,
+    /// Closes the browser and starts it again, installing a downloaded update.
+    RestartToUpdate,
 }
 
 /// Whether a page's URL can be bookmarked or kept in history.

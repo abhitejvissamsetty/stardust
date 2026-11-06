@@ -6,12 +6,15 @@ mod discard;
 mod downloads;
 mod error_page;
 mod history;
+mod logins;
 mod messages;
+mod permissions;
 mod session;
 mod settings;
 mod shortcuts;
 pub mod storage_types;
 mod tabs;
+mod video;
 
 pub use address::resolve_input;
 pub use discard::{
@@ -20,7 +23,9 @@ pub use discard::{
 pub use downloads::{Download, DownloadList, DownloadState, safe_file_name, unique_path};
 pub use error_page::error_page;
 pub use history::{TabHistory, is_risky_file};
+pub use logins::{LOGIN_WATCHER, SubmittedLogin, fill_script, login_origin};
 pub use messages::{BrowserState, UiCommand, UiEvent};
+pub use permissions::{Answer, Decision, Permission, SitePermissions, describe, site_origin};
 pub use session::{SavedWindows, Session, SessionTab};
 pub use settings::{
     DEFAULT_HOMEPAGE, InternalPage, PageCommand, SearchEngine, Settings, StartupMode, is_web_url,
@@ -28,3 +33,4 @@ pub use settings::{
 };
 pub use shortcuts::{KeyPress, Shortcut, shortcut_for};
 pub use tabs::{Tab, TabId, TabStrip};
+pub use video::{VAAPI_FEATURES, add_features, has_vaapi_driver, vaapi_driver_folders};

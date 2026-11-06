@@ -192,6 +192,7 @@ function render() {
   byId("stop-icon").toggleAttribute("hidden", !tab.isLoading);
 
   byId("lock-icon").toggleAttribute("hidden", !tab.url.startsWith("https://"));
+  byId("fill-login").hidden = !tab.hasLogins;
   const star = byId("star");
   star.disabled = !/^https?:\/\//.test(tab.url);
   star.setAttribute("aria-pressed", String(tab.isBookmarked));
@@ -302,19 +303,25 @@ const findInput = byId("find-input");
 // Page dialogs. The message and origin come from the page, so they're only set as text.
 function showDialog(event) {
   const isLeave = event.kind === "leave";
+  // For a permission, the browser sends the site's host and what it asks for.
+  const isPermission = event.kind === "permission";
   let origin = "";
   try {
     origin = event.origin ? `${new URL(event.origin).host} says` : "";
   } catch {
     origin = event.origin;
   }
-  byId("dialog-origin").textContent = isLeave ? "Leave this site?" : origin;
+  byId("dialog-origin").textContent = isLeave ? "Leave this site?" : isPermission ? event.origin : origin;
   const message = isLeave ? "Changes you made may not be saved." : event.message;
   byId("dialog-message").textContent = message;
   byId("dialog-message").title = message;
   byId("dialog-cancel").hidden = event.kind === "alert";
-  byId("dialog-cancel").textContent = isLeave ? "Stay" : "Cancel";
-  byId("dialog-ok").textContent = isLeave ? "Leave" : "OK";
+  const isSave = event.kind === "savePassword";
+  if (isSave) {
+    byId("dialog-origin").textContent = event.origin;
+  }
+  byId("dialog-cancel").textContent = isLeave ? "Stay" : isPermission ? "Block" : isSave ? "Never" : "Cancel";
+  byId("dialog-ok").textContent = isLeave ? "Leave" : isPermission ? "Allow" : isSave ? "Save" : "OK";
   const input = byId("dialog-input");
   input.hidden = event.kind !== "prompt";
   input.value = event.defaultText;
@@ -516,6 +523,7 @@ byId("dialog").addEventListener("keydown", (event) => {
 });
 
 byId("star").addEventListener("click", () => send({ type: "toggleBookmark" }));
+byId("fill-login").addEventListener("click", () => send({ type: "fillLogin" }));
 byId("keep-downloading").addEventListener("click", () => {
   byId("close-warning").hidden = true;
   send({ type: "confirmClose", close: false });

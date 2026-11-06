@@ -7,11 +7,12 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use bridge::{
-    DISCARD_CHECK_MS, DISCARD_IDLE_MS, DISCARD_LOADED_LIMIT, Download, DownloadList, DownloadState,
-    InternalPage, KeyPress, LoadedTab, PageCommand, SavedWindows, SearchEngine, Session,
-    SessionTab, Settings, Shortcut, StartupMode, TabHistory, TabId, TabStrip, UiCommand, UiEvent,
-    error_page, is_risky_file, is_web_url, normalize_homepage, resolve_input, safe_file_name,
-    shortcut_for,
+    Answer, DISCARD_CHECK_MS, DISCARD_IDLE_MS, DISCARD_LOADED_LIMIT, Decision, Download,
+    DownloadList, DownloadState, InternalPage, KeyPress, LoadedTab, PageCommand, Permission,
+    SavedWindows, SearchEngine, Session, SessionTab, Settings, Shortcut, SitePermissions,
+    StartupMode, SubmittedLogin, TabHistory, TabId, TabStrip, UiCommand, UiEvent, describe,
+    error_page, is_risky_file, is_web_url, login_origin, normalize_homepage, resolve_input,
+    safe_file_name, shortcut_for, site_origin,
     storage_types::{FolderItems, SuggestionItem},
     tabs_to_discard, unique_path,
 };
@@ -21,9 +22,9 @@ use storage::{DownloadRecord, Storage};
 
 use crate::{
     app::open_window,
-    data_dir,
-    render::UI_COMMAND_MESSAGE,
-    ui::{MENU_FRAME_NAME, internal_page_for_url, internal_url},
+    data_dir, passwords,
+    render::{FILL_LOGIN_MESSAGE, LOGIN_SUBMITTED_MESSAGE, UI_COMMAND_MESSAGE},
+    ui::{MENU_FRAME_NAME, internal_page_for_url, internal_url, toolbar_url},
 };
 
 const ERR_ABORTED: i32 = -3;
@@ -49,6 +50,17 @@ const BOOKMARKS_BAR_LIMIT: u32 = 200;
 const SETTING_ASK_DOWNLOAD_LOCATION: &str = "ask_download_location";
 const SETTING_SAVE_MEMORY: &str = "save_memory";
 const CLEAR_ORIGIN_LIMIT: u32 = 2000;
+const SETTING_SITE_PERMISSIONS: &str = "site_permissions";
+const MEDIA_AUDIO: u32 =
+    sys::cef_media_access_permission_types_t::CEF_MEDIA_PERMISSION_DEVICE_AUDIO_CAPTURE as u32;
+const MEDIA_VIDEO: u32 =
+    sys::cef_media_access_permission_types_t::CEF_MEDIA_PERMISSION_DEVICE_VIDEO_CAPTURE as u32;
+const PROMPT_CAMERA: u32 =
+    sys::cef_permission_request_types_t::CEF_PERMISSION_TYPE_CAMERA_STREAM as u32;
+const PROMPT_MICROPHONE: u32 =
+    sys::cef_permission_request_types_t::CEF_PERMISSION_TYPE_MIC_STREAM as u32;
+const PROMPT_LOCATION: u32 =
+    sys::cef_permission_request_types_t::CEF_PERMISSION_TYPE_GEOLOCATION as u32;
 
 #[cfg(target_os = "linux")]
 type OsEvent = sys::XEvent;
@@ -94,7 +106,7 @@ pub struct Shell {
     find_bar_shown: bool,
     bookmarks_bar_shown: bool,
     /// A page's waiting dialog: which tab asked, and how to answer it.
-    dialog: Option<(TabId, JsdialogCallback)>,
+    dialog: Option<(TabId, PendingDialog)>,
     /// The browser for suggestions and bookmark folder menus, created when first needed.
     popup_view: Option<BrowserView>,
     popup: Option<Browser>,
@@ -117,6 +129,41 @@ pub struct Shell {
     background_loads: Vec<TabId>,
 }
 
+/// What the dialog bar is asking, and how to answer.
+enum PendingDialog {
+    /// An alert, confirm, prompt or "Leave site?" from a page.
+    Page(JsdialogCallback),
+    /// The camera or microphone, asked for by `getUserMedia`.
+    Media {
+        callback: MediaAccessCallback,
+        requested: u32,
+        site: String,
+        permissions: Vec<Permission>,
+    },
+    /// Whether to save a login just sent from a page.
+    SaveLogin {
+        origin: String,
+        username: String,
+        password: String,
+    },
+    /// Other permissions, such as location.
+    Prompt {
+        callback: PermissionPromptCallback,
+        id: u64,
+        site: String,
+        permissions: Vec<Permission>,
+    },
+}
+
+/// How the person answered the dialog bar.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Reply {
+    Accept,
+    Decline,
+    /// Gone without an answer, such as by switching tabs. Nothing is remembered.
+    Dismiss,
+}
+
 /// Data shared by every window.
 struct SavedData {
     /// None if the database couldn't open. The browser still works, but saves nothing.
@@ -124,6 +171,7 @@ struct SavedData {
     settings: Mutex<Settings>,
     /// The session as last saved, to avoid rewriting it when nothing changed.
     session: Mutex<String>,
+    permissions: Mutex<SitePermissions>,
 }
 
 fn saved_data() -> &'static SavedData {
@@ -156,12 +204,28 @@ fn saved_data() -> &'static SavedData {
             ask_download_location: saved(SETTING_ASK_DOWNLOAD_LOCATION).as_deref() == Some("1"),
             save_memory: saved(SETTING_SAVE_MEMORY).as_deref() != Some("0"),
         };
+        let permissions = saved(SETTING_SITE_PERMISSIONS)
+            .map(|json| SitePermissions::parse(&json))
+            .unwrap_or_default();
         SavedData {
             storage: storage.map(Mutex::new),
             settings: Mutex::new(settings),
             session: Mutex::default(),
+            permissions: Mutex::new(permissions),
         }
     })
+}
+
+fn site_permissions() -> MutexGuard<'static, SitePermissions> {
+    saved_data()
+        .permissions
+        .lock()
+        .expect("Failed to lock site permissions")
+}
+
+fn save_site_permissions() {
+    let json = site_permissions().to_json();
+    with_storage(|storage| storage.set_setting(SETTING_SITE_PERMISSIONS, &json));
 }
 
 fn settings() -> MutexGuard<'static, Settings> {
@@ -695,14 +759,14 @@ fn show_dialog(
     origin: &str,
     message: &str,
     default_text: &str,
-    callback: &JsdialogCallback,
+    pending: PendingDialog,
 ) -> bool {
     let toolbar = {
         let mut guard = lock(shell);
         if guard.dialog.is_some() || guard.strip.active_id() != Some(id) {
             return false;
         }
-        guard.dialog = Some((id, callback.clone()));
+        guard.dialog = Some((id, pending));
         guard.toolbar.clone()
     };
     resize_toolbar(shell);
@@ -722,18 +786,204 @@ fn show_dialog(
     true
 }
 
-fn answer_dialog(shell: &SharedShell, accepted: bool, input: &str) {
-    let Some((_, callback)) = lock(shell).dialog.take() else {
+fn answer_dialog(shell: &SharedShell, reply: Reply, input: &str) {
+    let Some((_, pending)) = lock(shell).dialog.take() else {
         return;
     };
     close_dialog_bar(shell);
-    callback.cont(accepted.into(), Some(&CefString::from(input)));
-    // Staying on a page after "Leave site?" also calls off the window closing.
-    if !accepted {
-        lock(shell).window_closing = false;
-        QUITTING.store(false, Ordering::Relaxed);
+    let accepted = reply == Reply::Accept;
+    match pending {
+        PendingDialog::Page(callback) => {
+            callback.cont(accepted.into(), Some(&CefString::from(input)));
+            // Staying on a page after "Leave site?" also calls off the window closing.
+            if !accepted {
+                lock(shell).window_closing = false;
+                QUITTING.store(false, Ordering::Relaxed);
+            }
+        }
+        PendingDialog::Media {
+            callback,
+            requested,
+            site,
+            permissions,
+        } => {
+            remember_permission(reply, &site, &permissions);
+            if accepted {
+                callback.cont(requested);
+            } else {
+                callback.cancel();
+            }
+        }
+        PendingDialog::SaveLogin {
+            origin,
+            username,
+            password,
+        } => match reply {
+            Reply::Accept => {
+                if passwords::save(&origin, &username, &password).is_ok() {
+                    with_storage(|storage| storage.save_login(&origin, &username, now_ms()));
+                    refresh_login_keys();
+                }
+            }
+            Reply::Decline => {
+                with_storage(|storage| storage.set_never_save_login(&origin, true));
+            }
+            Reply::Dismiss => {}
+        },
+        PendingDialog::Prompt {
+            callback,
+            site,
+            permissions,
+            ..
+        } => {
+            remember_permission(reply, &site, &permissions);
+            callback.cont(match reply {
+                Reply::Accept => PermissionRequestResult::ACCEPT,
+                Reply::Decline => PermissionRequestResult::DENY,
+                Reply::Dismiss => PermissionRequestResult::DISMISS,
+            });
+        }
     }
     focus_active_tab(shell);
+}
+
+/// Whether a page's site has saved logins, for the toolbar's key button.
+fn has_saved_logins(url: &str) -> bool {
+    login_origin(url).is_some_and(|origin| {
+        with_storage(|storage| storage.logins(Some(&origin)))
+            .is_some_and(|logins| !logins.is_empty())
+    })
+}
+
+/// Updates every tab's key button after logins change.
+fn refresh_login_keys() {
+    for shell in open_windows() {
+        let changed = {
+            let mut guard = lock(&shell);
+            let mut changed = false;
+            let ids: Vec<TabId> = guard.strip.tabs().iter().map(|tab| tab.id).collect();
+            for id in ids {
+                if let Some(tab) = guard.strip.get_mut(id) {
+                    let has_logins = has_saved_logins(&tab.page.url);
+                    changed |= tab.page.has_logins != has_logins;
+                    tab.page.has_logins = has_logins;
+                }
+            }
+            changed
+        };
+        if changed {
+            publish(&shell);
+        }
+    }
+}
+
+/// A page reported a login being sent. Offers to save it, unless it's saved already
+/// or the person said never for this site.
+fn offer_to_save_login(shell: &SharedShell, tab: TabId, url: &str, json: &str) {
+    let (Some(origin), Some(login)) = (login_origin(url), SubmittedLogin::parse(json)) else {
+        return;
+    };
+    if with_storage(|storage| storage.never_saves_logins(&origin)).unwrap_or(true) {
+        return;
+    }
+    let saved = passwords::get(&origin, &login.username);
+    if saved.as_deref() == Some(login.password.as_str()) {
+        with_storage(|storage| storage.save_login(&origin, &login.username, now_ms()));
+        return;
+    }
+    let who = if login.username.is_empty() {
+        "this site".to_owned()
+    } else {
+        login.username.clone()
+    };
+    let message = if saved.is_some() {
+        format!("Update the saved password for {who}?")
+    } else {
+        format!("Save the password for {who}?")
+    };
+    let host = origin
+        .split_once("://")
+        .map_or(origin.as_str(), |(_, host)| host)
+        .to_owned();
+    let pending = PendingDialog::SaveLogin {
+        origin,
+        username: login.username,
+        password: login.password,
+    };
+    show_dialog(shell, tab, "savePassword", &host, &message, "", pending);
+}
+
+/// Fills the active page's most recently used login, when the person asks.
+fn fill_login(shell: &SharedShell) {
+    let Some(browser) = active_browser(shell) else {
+        return;
+    };
+    let Some(frame) = browser.main_frame() else {
+        return;
+    };
+    let Some(origin) = login_origin(&CefString::from(&frame.url()).to_string()) else {
+        return;
+    };
+    let Some(login) = with_storage(|storage| storage.logins(Some(&origin)))
+        .and_then(|logins| logins.into_iter().next())
+    else {
+        return;
+    };
+    let Some(password) = passwords::get(&origin, &login.username) else {
+        return;
+    };
+    let Some(mut message) = process_message_create(Some(&CefString::from(FILL_LOGIN_MESSAGE)))
+    else {
+        return;
+    };
+    if let Some(list) = message.argument_list() {
+        list.set_string(0, Some(&CefString::from(origin.as_str())));
+        list.set_string(1, Some(&CefString::from(login.username.as_str())));
+        list.set_string(2, Some(&CefString::from(password.as_str())));
+    }
+    frame.send_process_message(ProcessId::RENDERER, Some(&mut message));
+    with_storage(|storage| storage.save_login(&origin, &login.username, now_ms()));
+}
+
+fn remember_permission(reply: Reply, site: &str, permissions: &[Permission]) {
+    let decision = match reply {
+        Reply::Accept => Decision::Allow,
+        Reply::Decline => Decision::Block,
+        Reply::Dismiss => return,
+    };
+    site_permissions().remember(site, permissions, decision);
+    save_site_permissions();
+}
+
+/// Decides a site's request from saved choices, or asks in the dialog bar. Returns
+/// whether it's allowed now, blocked now, or waiting for the person.
+fn ask_permission(
+    shell: &SharedShell,
+    tab: TabId,
+    requesting_origin: &str,
+    permissions: Vec<Permission>,
+    make_pending: impl FnOnce(String, Vec<Permission>) -> PendingDialog,
+) -> Option<bool> {
+    let Some(site) = site_origin(requesting_origin) else {
+        return Some(false);
+    };
+    match site_permissions().answer(&site, &permissions) {
+        Answer::Allow => return Some(true),
+        Answer::Block => return Some(false),
+        Answer::Ask(_) => {}
+    }
+    let host = site
+        .split_once("://")
+        .map_or(site.as_str(), |(_, host)| host)
+        .to_owned();
+    let message = format!("wants to {}", describe(&permissions));
+    let pending = make_pending(site, permissions);
+    // A tab out of view, or one already asking something, is refused for now.
+    if show_dialog(shell, tab, "permission", &host, &message, "", pending) {
+        None
+    } else {
+        Some(false)
+    }
 }
 
 fn close_dialog_bar(shell: &SharedShell) {
@@ -1178,7 +1428,7 @@ pub fn select_tab(shell: &SharedShell, id: TabId) {
         .as_ref()
         .is_some_and(|(tab, _)| *tab != id);
     if has_other_dialog {
-        answer_dialog(shell, false, "");
+        answer_dialog(shell, Reply::Dismiss, "");
     }
     let (should_close_find, unloaded) = {
         let mut shell = lock(shell);
@@ -1380,7 +1630,14 @@ fn run_command(shell: &SharedShell, command: UiCommand) {
             }
         }
         UiCommand::ConfirmClose { close } => resolve_close_confirmation(shell, close),
-        UiCommand::AnswerDialog { accepted, input } => answer_dialog(shell, accepted, &input),
+        UiCommand::AnswerDialog { accepted, input } => {
+            let reply = if accepted {
+                Reply::Accept
+            } else {
+                Reply::Decline
+            };
+            answer_dialog(shell, reply, &input);
+        }
         UiCommand::TearOffTab { id } => move_tab(shell, id, None),
         UiCommand::AdoptTab { from_window, id } => {
             let source = open_windows().into_iter().find(|window| {
@@ -1404,6 +1661,7 @@ fn run_command(shell: &SharedShell, command: UiCommand) {
             }
         }
         UiCommand::OpenPage { page } => open_page(shell, page),
+        UiCommand::FillLogin => fill_login(shell),
         UiCommand::SelectTab { id } => select_tab(shell, id),
         UiCommand::CloseTab { id } => close_tab(shell, id),
         UiCommand::MoveTab { id, index } => {
@@ -1631,6 +1889,52 @@ fn run_page_command(shell: &SharedShell, frame: &Frame, command: PageCommand) {
         PageCommand::SetSearchEngine { engine } => {
             settings().search_engine = engine;
             with_storage(|storage| storage.set_setting(SETTING_SEARCH_ENGINE, engine.id()));
+        }
+        PageCommand::ListLogins => {
+            let logins = with_storage(|storage| storage.logins(None)).unwrap_or_default();
+            let never = with_storage(Storage::never_save_login_sites).unwrap_or_default();
+            reply(serde_json::json!({ "type": "logins", "logins": logins, "neverSave": never }));
+        }
+        PageCommand::DeleteLogin { origin, username } => {
+            passwords::delete(&origin, &username);
+            with_storage(|storage| storage.delete_login(&origin, &username));
+            refresh_login_keys();
+            let logins = with_storage(|storage| storage.logins(None)).unwrap_or_default();
+            let never = with_storage(Storage::never_save_login_sites).unwrap_or_default();
+            reply(serde_json::json!({ "type": "logins", "logins": logins, "neverSave": never }));
+        }
+        PageCommand::ForgetNeverSaveLogin { origin } => {
+            with_storage(|storage| storage.set_never_save_login(&origin, false));
+            let logins = with_storage(|storage| storage.logins(None)).unwrap_or_default();
+            let never = with_storage(Storage::never_save_login_sites).unwrap_or_default();
+            reply(serde_json::json!({ "type": "logins", "logins": logins, "neverSave": never }));
+        }
+        PageCommand::ListSitePermissions => {
+            let sites = site_permissions().sites().clone();
+            reply(serde_json::json!({ "type": "sitePermissions", "sites": sites }));
+        }
+        PageCommand::ForgetSitePermissions { site } => {
+            site_permissions().forget(&site);
+            save_site_permissions();
+            let sites = site_permissions().sites().clone();
+            reply(serde_json::json!({ "type": "sitePermissions", "sites": sites }));
+        }
+        PageCommand::GetUpdateStatus => {
+            reply(serde_json::json!({
+                "type": "updateStatus",
+                "version": crate::updates::VERSION,
+                "status": crate::updates::status(),
+            }));
+        }
+        PageCommand::CheckForUpdates => crate::updates::check_in_background(),
+        PageCommand::RestartToUpdate => {
+            if matches!(
+                crate::updates::status(),
+                crate::updates::Status::Ready { .. }
+            ) {
+                crate::updates::restart_after_quit();
+                close_all_browsers();
+            }
         }
         PageCommand::ListImportSources => {
             let sources = find_import_sources();
@@ -1966,7 +2270,8 @@ wrap_life_span_handler! {
     }
 }
 
-// The menu under the toolbar. It can only navigate and close itself.
+// The menu under the toolbar. It has no bridge of its own: it speaks through the
+// toolbar that opened it, and it never navigates.
 wrap_client! {
     pub struct PopupClient {
         shell: SharedShell,
@@ -1982,34 +2287,9 @@ wrap_client! {
         }
 
         fn request_handler(&self) -> Option<RequestHandler> {
-            Some(ToolbarRequests::new())
+            Some(MenuRequests::new())
         }
 
-        fn on_process_message_received(
-            &self,
-            _browser: Option<&mut Browser>,
-            _frame: Option<&mut Frame>,
-            _source_process: ProcessId,
-            message: Option<&mut ProcessMessage>,
-        ) -> i32 {
-            let Some(message) = message else {
-                return 0;
-            };
-            if CefString::from(&message.name()).to_string() != UI_COMMAND_MESSAGE {
-                return 0;
-            }
-            let json = message
-                .argument_list()
-                .map(|list| CefString::from(&list.string(0)).to_string())
-                .unwrap_or_default();
-            if let Ok(
-                command @ (UiCommand::Navigate { .. } | UiCommand::HidePopup | UiCommand::PopupReady),
-            ) = serde_json::from_str(&json)
-            {
-                run_command(&self.shell, command);
-            }
-            1
-        }
     }
 }
 
@@ -2036,8 +2316,9 @@ wrap_request_handler! {
     struct ToolbarRequests {}
 
     impl RequestHandler {
-        // The toolbar only ever shows its own page. Refuse anything else, such as a
-        // dropped link.
+        // The toolbar only ever shows its own page, because the browser trusts every
+        // message from it. Anything else, such as a dropped link, even to another
+        // `data:` page, is refused.
         fn on_before_browse(
             &self,
             _browser: Option<&mut Browser>,
@@ -2047,7 +2328,25 @@ wrap_request_handler! {
             _is_redirect: i32,
         ) -> i32 {
             let url = request.map(|request| CefString::from(&request.url()).to_string());
-            (!url.is_some_and(|url| url.starts_with("data:text/html;base64,"))).into()
+            (url.as_deref() != Some(toolbar_url())).into()
+        }
+    }
+}
+
+wrap_request_handler! {
+    struct MenuRequests {}
+
+    impl RequestHandler {
+        // The toolbar writes the menu's page itself, so the menu never navigates.
+        fn on_before_browse(
+            &self,
+            _browser: Option<&mut Browser>,
+            _frame: Option<&mut Frame>,
+            _request: Option<&mut Request>,
+            _user_gesture: i32,
+            _is_redirect: i32,
+        ) -> i32 {
+            1
         }
     }
 }
@@ -2112,7 +2411,7 @@ wrap_client! {
         }
 
         fn permission_handler(&self) -> Option<PermissionHandler> {
-            Some(DenyPermissions::new())
+            Some(SitePermissionPrompts::new(self.shell.clone(), self.id))
         }
 
         fn download_handler(&self) -> Option<DownloadHandler> {
@@ -2147,10 +2446,21 @@ wrap_client! {
             let (Some(frame), Some(message)) = (frame, message) else {
                 return 0;
             };
-            if CefString::from(&message.name()).to_string() != UI_COMMAND_MESSAGE {
+            let name = CefString::from(&message.name()).to_string();
+            let url = CefString::from(&frame.url()).to_string();
+            if name == LOGIN_SUBMITTED_MESSAGE {
+                if frame.is_main() != 0 {
+                    let json = message
+                        .argument_list()
+                        .map(|list| CefString::from(&list.string(0)).to_string())
+                        .unwrap_or_default();
+                    offer_to_save_login(&self.shell, self.id, &url, &json);
+                }
+                return 1;
+            }
+            if name != UI_COMMAND_MESSAGE {
                 return 0;
             }
-            let url = CefString::from(&frame.url()).to_string();
             if frame.is_main() == 0 || internal_page_for_url(&url).is_none() {
                 return 1;
             }
@@ -2197,7 +2507,7 @@ wrap_jsdialog_handler! {
                     &text(origin_url),
                     &text(message_text),
                     &text(default_prompt_text),
-                    callback,
+                    PendingDialog::Page(callback.clone()),
                 )
             });
             // A background tab can't interrupt, so its dialog is dropped.
@@ -2224,7 +2534,8 @@ wrap_jsdialog_handler! {
                 return 1;
             }
             let message = message_text.map(CefString::to_string).unwrap_or_default();
-            if !show_dialog(&self.shell, self.id, "leave", "", &message, "", callback) {
+            let pending = PendingDialog::Page(callback.clone());
+            if !show_dialog(&self.shell, self.id, "leave", "", &message, "", pending) {
                 // A background tab can't hold up closing.
                 callback.cont(1, None);
             }
@@ -2234,7 +2545,11 @@ wrap_jsdialog_handler! {
         fn on_reset_dialog_state(&self, _browser: Option<&mut Browser>) {
             let was_showing = {
                 let mut shell = lock(&self.shell);
-                let is_ours = shell.dialog.as_ref().is_some_and(|(tab, _)| *tab == self.id);
+                // Only the page's own dialogs end when it navigates. A login form
+                // usually navigates as it's sent, and its save prompt must stay.
+                let is_ours = shell.dialog.as_ref().is_some_and(|(tab, pending)| {
+                    *tab == self.id && matches!(pending, PendingDialog::Page(_))
+                });
                 if is_ours {
                     shell.dialog = None;
                 }
@@ -2426,35 +2741,119 @@ wrap_download_handler! {
 
 // There's no permission prompt UI yet. Without an answer, pages wait forever.
 wrap_permission_handler! {
-    struct DenyPermissions {}
+    struct SitePermissionPrompts {
+        shell: SharedShell,
+        id: TabId,
+    }
 
     impl PermissionHandler {
+        // The camera and microphone. Sharing the screen isn't supported, because it
+        // needs a picker for what to share.
         fn on_request_media_access_permission(
             &self,
             _browser: Option<&mut Browser>,
             _frame: Option<&mut Frame>,
-            _requesting_origin: Option<&CefString>,
-            _requested_permissions: u32,
+            requesting_origin: Option<&CefString>,
+            requested_permissions: u32,
             callback: Option<&mut MediaAccessCallback>,
         ) -> i32 {
-            if let Some(callback) = callback {
-                callback.cancel();
+            let Some(callback) = callback else {
+                return 0;
+            };
+            let origin = requesting_origin.map(CefString::to_string).unwrap_or_default();
+            let mut permissions = Vec::new();
+            if requested_permissions & MEDIA_VIDEO != 0 {
+                permissions.push(Permission::Camera);
+            }
+            if requested_permissions & MEDIA_AUDIO != 0 {
+                permissions.push(Permission::Microphone);
+            }
+            let only_devices = requested_permissions & !(MEDIA_AUDIO | MEDIA_VIDEO) == 0;
+            let answer = if only_devices {
+                let pending_callback = callback.clone();
+                ask_permission(&self.shell, self.id, &origin, permissions, |site, permissions| {
+                    PendingDialog::Media {
+                        callback: pending_callback,
+                        requested: requested_permissions,
+                        site,
+                        permissions,
+                    }
+                })
+            } else {
+                Some(false)
+            };
+            match answer {
+                Some(true) => callback.cont(requested_permissions),
+                Some(false) => callback.cancel(),
+                None => {}
             }
             1
         }
 
+        // Location, and the camera and microphone when a page asks ahead of using them.
+        // Anything else, including notifications, which this browser can't show, is
+        // refused.
         fn on_show_permission_prompt(
             &self,
             _browser: Option<&mut Browser>,
-            _prompt_id: u64,
-            _requesting_origin: Option<&CefString>,
-            _requested_permissions: u32,
+            prompt_id: u64,
+            requesting_origin: Option<&CefString>,
+            requested_permissions: u32,
             callback: Option<&mut PermissionPromptCallback>,
         ) -> i32 {
-            if let Some(callback) = callback {
-                callback.cont(PermissionRequestResult::DENY);
+            let Some(callback) = callback else {
+                return 0;
+            };
+            let origin = requesting_origin.map(CefString::to_string).unwrap_or_default();
+            let known = [
+                (PROMPT_CAMERA, Permission::Camera),
+                (PROMPT_MICROPHONE, Permission::Microphone),
+                (PROMPT_LOCATION, Permission::Location),
+            ];
+            let permissions: Vec<Permission> = known
+                .iter()
+                .filter(|(bit, _)| requested_permissions & bit != 0)
+                .map(|(_, permission)| *permission)
+                .collect();
+            let all_known = known
+                .iter()
+                .fold(requested_permissions, |rest, (bit, _)| rest & !bit)
+                == 0;
+            let answer = if all_known {
+                let pending_callback = callback.clone();
+                ask_permission(&self.shell, self.id, &origin, permissions, |site, permissions| {
+                    PendingDialog::Prompt {
+                        callback: pending_callback,
+                        id: prompt_id,
+                        site,
+                        permissions,
+                    }
+                })
+            } else {
+                Some(false)
+            };
+            match answer {
+                Some(true) => callback.cont(PermissionRequestResult::ACCEPT),
+                Some(false) => callback.cont(PermissionRequestResult::DENY),
+                None => {}
             }
             1
+        }
+
+        // The page went away or stopped asking, so its question goes too.
+        fn on_dismiss_permission_prompt(
+            &self,
+            _browser: Option<&mut Browser>,
+            prompt_id: u64,
+            _result: PermissionRequestResult,
+        ) {
+            let is_this_prompt = lock(&self.shell).dialog.as_ref().is_some_and(|(tab, pending)| {
+                *tab == self.id && matches!(pending, PendingDialog::Prompt { id, .. } if *id == prompt_id)
+            });
+            if is_this_prompt {
+                lock(&self.shell).dialog = None;
+                close_dialog_bar(&self.shell);
+            }
         }
     }
 }
@@ -2515,9 +2914,11 @@ wrap_display_handler! {
                     Some(history.clone())
                 })
             };
+            let has_logins = has_saved_logins(&url);
             update_tab(&self.shell, self.id, |tab| {
                 tab.page.url = url;
                 tab.page.is_bookmarked = is_bookmarked;
+                tab.page.has_logins = has_logins;
                 if let Some(history) = own_list {
                     tab.page.can_go_back = history.can_go_back();
                     tab.page.can_go_forward = history.can_go_forward();

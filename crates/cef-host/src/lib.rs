@@ -5,14 +5,28 @@ mod app;
 mod client;
 #[cfg(target_os = "macos")]
 mod mac;
+mod passwords;
 mod render;
 mod ui;
+mod updates;
 
 use cef::*;
 
 /// Runs the browser until its last window closes. CEF relaunches this executable
 /// for its helper processes, so those return from here once their work is done.
 pub fn run() -> Result<(), &'static str> {
+    // Helper processes start this executable too, with `--type`. Only the browser
+    // itself installs updates.
+    let is_helper = std::env::args().any(|arg| arg.starts_with("--type="));
+    if !is_helper && let Some(executable) = updates::install_downloaded() {
+        let restarted = std::process::Command::new(executable)
+            .args(std::env::args().skip(1))
+            .spawn();
+        if restarted.is_ok() {
+            return Ok(());
+        }
+    }
+
     #[cfg(target_os = "macos")]
     let _library = {
         let exe = std::env::current_exe().map_err(|_| "failed to find executable")?;
@@ -112,5 +126,6 @@ fn run_with_args(args: &args::Args, sandbox_info: *mut u8) -> Result<(), &'stati
 
     run_message_loop();
     shutdown();
+    updates::restart_if_asked();
     Ok(())
 }
