@@ -35,7 +35,7 @@ pub use settings::{
     StartupMode, is_web_url, normalize_homepage,
 };
 pub use shortcuts::{KeyPress, Shortcut, shortcut_for};
-pub use sidepanel::{SidePanelData, Snippet, Todo};
+pub use sidepanel::{CLIP_SCRIPT, Clip, SidePanelData, Snippet, Todo};
 pub use tabs::{Tab, TabId, TabStrip};
 pub use video::{VAAPI_FEATURES, add_features, has_vaapi_driver, vaapi_driver_folders};
 pub use workspaces::{

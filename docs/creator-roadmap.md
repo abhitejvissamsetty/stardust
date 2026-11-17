@@ -85,7 +85,7 @@ Build these as part of the browser. Many can be done with scripts the browser in
 | Screen and camera recorder, with a webcam bubble | Loom, Screencastify | L | Needs capture from Phase 0 |
 | Screenshot and annotate, full page or region | Several | M | |
 | Colour picker and font identifier | ColorZilla, WhatFont | S | A browser eyedropper API exists |
-| Web clipper to a folder of notes, Notion or Obsidian | Clippers | M | Open formats first |
+| Web clipper to a folder of notes, Notion or Obsidian | Clippers | M | **First version built, see [milestone-6.md](milestone-6.md).** Markdown copy only; no folders, tags or direct export yet |
 | Thumbnail preview: how a title and image look in search and feeds | Part of vidIQ, TubeBuddy | M | |
 | Quick tools menu: resize, convert and compress an image or short video | Many small sites | M | |
 | Asset library: everything you've clipped, with tags and search | Folders of screenshots | L | |

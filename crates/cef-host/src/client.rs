@@ -26,7 +26,10 @@ use storage::{DownloadRecord, Storage};
 use crate::{
     app::{open_window, open_window_in},
     data_dir, passwords,
-    render::{FILL_LOGIN_MESSAGE, LOGIN_SUBMITTED_MESSAGE, UI_COMMAND_MESSAGE},
+    render::{
+        CLIP_REQUEST_MESSAGE, CLIP_RESULT_MESSAGE, FILL_LOGIN_MESSAGE, LOGIN_SUBMITTED_MESSAGE,
+        UI_COMMAND_MESSAGE,
+    },
     ui::{
         MENU_FRAME_NAME, internal_page_for_url, internal_url, side_panel_url, sidebar_url,
         toolbar_url,
@@ -164,6 +167,8 @@ pub struct Shell {
     side_panel: Option<Browser>,
     side_panel_view: Option<BrowserView>,
     side_panel_ready: bool,
+    /// The tab a clip has been asked for, until its page answers.
+    pending_clip: Option<TabId>,
     /// The workspace this window belongs to. Empty is the main one, which uses the
     /// browser's original profile; any other has a profile of its own on disk.
     workspace: String,
@@ -2344,6 +2349,14 @@ fn run_command(shell: &SharedShell, command: UiCommand) {
         }
         UiCommand::RemoveSnippet { id } => change_panel_data(|data| data.remove_snippet(id)),
         UiCommand::AddCurrentPageSnippet => add_current_page_snippet(shell),
+        UiCommand::ClipPage => clip_page(shell),
+        UiCommand::RemoveClip { id } => change_panel_data(|data| data.remove_clip(id)),
+        UiCommand::OpenClip { id } => {
+            let url = panel_data().clip_url(id).map(str::to_owned);
+            if let Some(url) = url.filter(|url| is_web_url(url)) {
+                run_command(shell, UiCommand::Navigate { input: url });
+            }
+        }
         // Only the tab list sends this, and it's handled where it arrives.
         UiCommand::SidebarReady => {}
         UiCommand::SetVerticalTabs { enabled } => set_vertical_tabs(enabled),
@@ -2842,6 +2855,7 @@ fn run_shortcut(shell: &SharedShell, event: &KeyEvent) -> bool {
         ),
         Shortcut::NewPrivateWindow => open_window(None, &[BLANK_PAGE.to_owned()], true),
         Shortcut::ToggleSidePanel => toggle_side_panel(shell),
+        Shortcut::ClipPage => clip_page(shell),
         Shortcut::ReopenClosedTab => reopen_closed_tab(shell),
         Shortcut::ZoomIn => change_zoom(shell, Some(true)),
         Shortcut::ZoomOut => change_zoom(shell, Some(false)),
@@ -3269,6 +3283,16 @@ wrap_client! {
             };
             let name = CefString::from(&message.name()).to_string();
             let url = CefString::from(&frame.url()).to_string();
+            if name == CLIP_RESULT_MESSAGE {
+                if frame.is_main() != 0 {
+                    let json = message
+                        .argument_list()
+                        .map(|list| CefString::from(&list.string(0)).to_string())
+                        .unwrap_or_default();
+                    finish_clip(&self.shell, self.id, &json);
+                }
+                return 1;
+            }
             if name == LOGIN_SUBMITTED_MESSAGE {
                 if frame.is_main() != 0 {
                     let json = message
@@ -4363,6 +4387,99 @@ fn add_current_page_snippet(shell: &SharedShell) {
     {
         save_panel_data();
         publish_panel_everywhere();
+    }
+}
+
+/// Shows a short message in the toolbar.
+fn toast(shell: &SharedShell, text: &str) {
+    let toolbar = {
+        let guard = lock(shell);
+        guard.toolbar.clone().filter(|_| guard.toolbar_ready)
+    };
+    send_to_toolbar(toolbar.as_ref(), &UiEvent::Toast { text });
+}
+
+/// Saves the active page as a clip, with the text selected on it, or else its description.
+fn clip_page(shell: &SharedShell) {
+    let (private, page) = {
+        let guard = lock(shell);
+        let page = guard
+            .strip
+            .active_id()
+            .and_then(|id| guard.strip.get(id))
+            .filter(|tab| is_web_url(&tab.page.url))
+            .map(|tab| tab.id);
+        (guard.private, page)
+    };
+    // What a private window does isn't kept, and clips are kept.
+    if private {
+        toast(shell, "Clips aren't kept in private windows");
+        return;
+    }
+    let Some(id) = page else {
+        toast(shell, "Only web pages can be clipped");
+        return;
+    };
+    let frame = active_browser(shell).and_then(|browser| browser.main_frame());
+    let message = process_message_create(Some(&CefString::from(CLIP_REQUEST_MESSAGE)));
+    let (Some(frame), Some(mut message)) = (frame, message) else {
+        lock(shell).pending_clip = Some(id);
+        finish_clip(shell, id, "");
+        return;
+    };
+    lock(shell).pending_clip = Some(id);
+    frame.send_process_message(ProcessId::RENDERER, Some(&mut message));
+    // A page that never answers still gets saved, just without text.
+    post_delayed_task(
+        ThreadId::UI,
+        Some(&mut ClipTimeout::new(shell.clone(), id)),
+        1500,
+    );
+}
+
+wrap_task! {
+    struct ClipTimeout {
+        shell: SharedShell,
+        id: TabId,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            finish_clip(&self.shell, self.id, "");
+        }
+    }
+}
+
+/// Saves the clip once the page has answered, or the wait is over. Only a clip that was
+/// asked for is accepted, and only once, so a page can't add clips on its own.
+fn finish_clip(shell: &SharedShell, id: TabId, json: &str) {
+    let page = {
+        let mut guard = lock(shell);
+        if guard.pending_clip != Some(id) {
+            return;
+        }
+        guard.pending_clip = None;
+        guard
+            .strip
+            .get(id)
+            .filter(|tab| is_web_url(&tab.page.url))
+            .map(|tab| (tab.title.clone(), tab.page.url.clone()))
+    };
+    let Some((title, url)) = page else {
+        return;
+    };
+    let read: serde_json::Value = serde_json::from_str(json).unwrap_or_default();
+    let text = |key: &str| read.get(key).and_then(|value| value.as_str()).unwrap_or("");
+    let selection = text("selection").trim();
+    let note = if selection.is_empty() {
+        text("description")
+    } else {
+        selection
+    };
+    if panel_data().add_clip(&title, &url, note, now_ms()) {
+        save_panel_data();
+        publish_panel_everywhere();
+        toast(shell, "Clipped");
     }
 }
 

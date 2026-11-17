@@ -560,6 +560,8 @@ window.onBrowserEvent = (event) => {
     if (menuState.owner === "extensions") {
       openExtensionsMenu();
     }
+  } else if (event.type === "toast") {
+    showToast(event.text);
   } else if (event.type === "sidePanel") {
     sidePanelOpen = event.open;
     byId("side-panel-button").setAttribute("aria-pressed", String(event.open));
@@ -759,6 +761,16 @@ function renderSiteInfo(tab) {
   info.title = secure ? "Connection is secure" : insecure ? "This page isn't encrypted, so others on the network could see it" : "";
 }
 
+// A short message beside the address bar, such as "Clipped".
+let toastTimer = null;
+function showToast(text) {
+  const toast = byId("toast");
+  toast.textContent = text;
+  toast.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => (toast.hidden = true), 2200);
+}
+
 // -- Command bar --------------------------------------------------------------------------
 //
 // The address bar, switched to search what's open and what can be done, when its text
@@ -789,6 +801,7 @@ function commandBarItems() {
   command("New private window", shortcut("N", { shift: true }), { type: "newPrivateWindow" });
   command("Reopen closed tab", shortcut("T", { shift: true }), { type: "reopenClosedTab" });
   command("Close this tab", shortcut("W"), { type: "closeTab", id: strip.activeId });
+  command("Clip this page", shortcut("S", { shift: true }), { type: "clipPage" });
   command(splitIds.length ? "Close split view" : "Split view", "Command", { type: "toggleSplitView" });
   command(sidePanelOpen ? "Close the side panel" : "Open the side panel", shortcut("E", { shift: true }), { type: "toggleSidePanel" });
   command(tabLayout.vertical ? "Show tabs across the top" : "Show tabs down the side", "Command", { type: "setVerticalTabs", enabled: !tabLayout.vertical });
@@ -928,6 +941,7 @@ function openAppMenu() {
     { label: "Bookmarks", shortcut: shortcut("O", { shift: true }), command: page("bookmarks") },
     { label: "Extensions", command: page("extensions") },
     { label: "Command bar: find tabs, workspaces, commands", shortcut: shortcut("A", { shift: true }), command: { type: "commandBar" } },
+    { label: "Clip this page", shortcut: shortcut("S", { shift: true }), command: { type: "clipPage" } },
     { label: sidePanelOpen ? "Close the side panel" : "Side panel: notes, to-dos, snippets", shortcut: shortcut("E", { shift: true }), command: { type: "toggleSidePanel" } },
     { label: splitIds.length ? "Close split view" : "Split view: two pages side by side", command: { type: "toggleSplitView" } },
     { label: tabLayout.vertical ? "Show tabs across the top" : "Show tabs down the side", command: { type: "setVerticalTabs", enabled: !tabLayout.vertical } },

@@ -1,4 +1,4 @@
-# Milestone 6: workspaces, vertical tabs, split view, side panel, command bar and the new icon
+# Milestone 6: workspaces, vertical tabs, split view, side panel, command bar, web clipper and the new icon
 
 Built and tested on macOS (Apple Silicon) on 2026-11-17. This is the first piece of Phase 1 of [creator-roadmap.md](creator-roadmap.md). Tested by driving the browser through Chromium's debugging protocol with real clicks, and by screenshots of Stardust's own pages. The native window frame wasn't looked at.
 
@@ -16,6 +16,7 @@ Built and tested on macOS (Apple Silicon) on 2026-11-17. This is the first piece
 | Split view: two pages side by side | **Done** and tested, but not by clicking a pane |
 | Side panel: notes, to-do list and snippets | **Done** and tested |
 | Command bar: find tabs, workspaces and commands | **Done** and tested |
+| Web clipper: save pages and selected text to the side panel | **Done** and tested |
 | Icon for Windows and Linux | **Not done**, see below |
 
 ## The icon
@@ -158,6 +159,37 @@ Real key presses and a real mouse click in the running browser: opening it, rank
 - **Bookmarks and history** aren't searched here: typing normally in the address bar still does that.
 - **Recent use:** results aren't ordered by what you used lately, and it doesn't learn.
 - **Your own commands**, and arguments such as "move tab to workspace…".
+- Windows and Linux.
+
+## Web clipper
+
+"Clip this page" saves the page you're on, with the text you've selected on it, to a **Clips** tab in the side panel. Cmd/Ctrl+Shift+S, the menu, the command bar, or the button in the Clips tab. A "Clipped" message shows beside the address bar.
+
+- **What a clip keeps:** the page's title and address (from the browser, not from the page), a note, and the date. The note is the text selected on the page, up to 2,000 characters, or else the page's own description (its `description` or `og:description` tag).
+- **One clip per page:** clipping the same address again replaces the earlier clip and moves it to the top. Up to 300 clips.
+- **In the panel:** each clip shows its title (click to open it in the current tab), the site and date, and the note. Copy link and remove sit beside it. **Copy all as Markdown** puts every clip on the clipboard as `## [title](address)` with the note quoted under it, so clips paste into notes, a document or a repository. That's the "never a hostage" rule: they leave in a plain format.
+- **Web pages only:** `http` and `https`. A blank tab, an internal page or a `data:` page isn't clipped, and the saved address is checked again when read.
+- **Private windows:** clipping is refused ("Clips aren't kept in private windows"), since clips are kept.
+- **Shared** with every window and workspace, like the rest of the side panel, and saved with the browser's settings.
+
+### How it works
+
+- The browser asks the page's own process for the selection and description with a message (`clip-request`), and it answers (`clip-result`). The reply is accepted only for a tab a clip was asked for, only once, and only from its main frame, so a page can't add clips by itself. A page that never answers is clipped without text after 1.5 seconds.
+- The script that reads the page (`CLIP_SCRIPT`) returns plain text, cut at fixed lengths. What comes back is untrusted: it's tidied (control characters turned to spaces) and only ever set as text.
+- The panel's own commands for clips (`clipPage`, `removeClip`, `openClip`) are in its allowed list. `openClip` takes only an id and looks the address up in what's saved, so the panel can't make the browser open an address of its choosing.
+
+### Tested
+
+In the running browser: clipping with a selection (the note was the selected sentence), clipping again with nothing selected (the page's description replaced the note, and there was still one clip), a second page, a blank tab (refused with a message), a private window (refused), the Clips tab by screenshot, Copy all as Markdown (checked on the clipboard), opening a clip by clicking its title, and removing one. Unit tests cover once-per-page, newest-first, web-only addresses, tidying and limits, and checking saved data.
+
+### Not tested or not built
+
+- **The shortcut on the keyboard,** only its unit test. The menu, the command bar and the panel button work.
+- **Folders, tags and search** for clips, and an export to Notion or Obsidian. Only Markdown is there.
+- **Clipping the page's text or a screenshot,** only a selection or the description. No offline copy.
+- **Clips from a frame inside a page,** such as an embedded document: only the main frame is read.
+- **Clips per workspace.** They're shared.
+- **Seen once and not understood:** during testing the side panel closed by itself and a "DevTools" page briefly appeared in the debugging list. It didn't come back in the steps that followed. If it does, note what was open.
 - Windows and Linux.
 
 ## Tests

@@ -6,12 +6,15 @@
 //! - Web pages get a watcher that reports logins being sent, so the browser can offer
 //!   to save them, and can be asked to fill a saved login.
 
-use bridge::{LOGIN_WATCHER, fill_script, login_origin};
+use bridge::{CLIP_SCRIPT, LOGIN_WATCHER, fill_script, is_web_url, login_origin};
 use cef::*;
 
 pub const UI_COMMAND_MESSAGE: &str = "ui-command";
 pub const LOGIN_SUBMITTED_MESSAGE: &str = "login-submitted";
 pub const FILL_LOGIN_MESSAGE: &str = "fill-login";
+/// The browser asks a web page what a clip should keep from it, and the page answers.
+pub const CLIP_REQUEST_MESSAGE: &str = "clip-request";
+pub const CLIP_RESULT_MESSAGE: &str = "clip-result";
 
 wrap_render_process_handler! {
     pub struct BridgeInstaller;
@@ -66,7 +69,12 @@ wrap_render_process_handler! {
             let (Some(frame), Some(message)) = (frame, message) else {
                 return 0;
             };
-            if CefString::from(&message.name()).to_string() != FILL_LOGIN_MESSAGE {
+            let name = CefString::from(&message.name()).to_string();
+            if name == CLIP_REQUEST_MESSAGE {
+                answer_clip_request(frame);
+                return 1;
+            }
+            if name != FILL_LOGIN_MESSAGE {
                 return 0;
             }
             let Some(list) = message.argument_list() else {
@@ -80,6 +88,38 @@ wrap_render_process_handler! {
             }
             1
         }
+    }
+}
+
+/// Reads the selection and description of a web page's main frame, and sends them back.
+/// An empty answer means nothing could be read.
+fn answer_clip_request(frame: &mut Frame) {
+    let url = CefString::from(&frame.url()).to_string();
+    let mut json = String::new();
+    if frame.is_main() != 0
+        && is_web_url(&url)
+        && let Some(context) = frame.v8_context()
+        && context.enter() != 0
+    {
+        let mut value = None;
+        let mut exception = None;
+        let evaluated = context.eval(
+            Some(&CefString::from(CLIP_SCRIPT)),
+            None,
+            0,
+            Some(&mut value),
+            Some(&mut exception),
+        );
+        if let Some(value) = value.filter(|_| evaluated != 0) {
+            json = CefString::from(&value.string_value()).to_string();
+        }
+        context.exit();
+    }
+    if let Some(mut message) = process_message_create(Some(&CefString::from(CLIP_RESULT_MESSAGE)))
+        && let Some(list) = message.argument_list()
+    {
+        list.set_string(0, Some(&CefString::from(json.as_str())));
+        frame.send_process_message(ProcessId::BROWSER, Some(&mut message));
     }
 }
 

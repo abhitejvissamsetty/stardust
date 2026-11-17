@@ -716,3 +716,13 @@ svg {
 }
 
 #side-panel-button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
+
+.toast {
+  background: var(--accent-soft);
+  border-radius: var(--radius-full);
+  color: var(--accent);
+  font-size: var(--text-sm);
+  padding: 4px 12px;
+  white-space: nowrap;
+}
+.toast[hidden] { display: none; }

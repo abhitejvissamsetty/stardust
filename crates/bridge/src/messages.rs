@@ -131,6 +131,15 @@ pub enum UiCommand {
     },
     /// Saves the active page's title and address as a snippet.
     AddCurrentPageSnippet,
+    /// Saves the active page, with the text selected on it, as a clip.
+    ClipPage,
+    RemoveClip {
+        id: u32,
+    },
+    /// Opens a saved clip's page in the active tab.
+    OpenClip {
+        id: u32,
+    },
     NewWindow,
     NewPrivateWindow,
     /// Shows a workspace's window, or opens it with the tabs it had.
@@ -204,6 +213,9 @@ impl UiCommand {
                 | Self::AddSnippet { .. }
                 | Self::RemoveSnippet { .. }
                 | Self::AddCurrentPageSnippet
+                | Self::ClipPage
+                | Self::RemoveClip { .. }
+                | Self::OpenClip { .. }
         )
     }
 }
@@ -248,6 +260,10 @@ pub enum UiEvent<'a> {
     /// The notes, to-dos and snippets, for the side panel.
     PanelData {
         data: &'a crate::SidePanelData,
+    },
+    /// A short message the toolbar shows for a moment, such as "Clipped".
+    Toast {
+        text: &'a str,
     },
     /// Whether this window's side panel is showing, for the toolbar's button.
     SidePanel {

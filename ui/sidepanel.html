@@ -22,7 +22,7 @@
       .tabs { display: flex; flex: 1; gap: var(--space-1); }
       .tab {
         background: transparent; border: 0; border-radius: 6px; color: var(--text-muted);
-        cursor: default; height: 30px; padding: 0 var(--space-3);
+        cursor: default; height: 30px; padding: 0 var(--space-2);
       }
       .tab:hover { background: var(--hover); color: var(--text); }
       .tab[aria-selected="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
@@ -57,6 +57,9 @@
       .snippet .head { align-items: center; display: flex; gap: var(--space-2); width: 100%; }
       .snippet .title { flex: 1; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .snippet .body { color: var(--text-muted); max-height: 3.6em; overflow: hidden; overflow-wrap: anywhere; white-space: pre-wrap; width: 100%; }
+      .link { background: transparent; border: 0; color: var(--accent); cursor: default; padding: 0; text-align: left; }
+      .link:hover { text-decoration: underline; }
+      .snippet .note { border-left: 2px solid var(--divider); padding-left: 8px; }
       .empty { color: var(--text-muted); padding: var(--space-3) var(--space-2); }
       input[type="checkbox"] { accent-color: var(--accent); flex: none; height: 16px; margin: 0; width: 16px; }
     </style>
@@ -67,6 +70,7 @@
         <button class="tab" role="tab" data-tab="notes" aria-selected="true">Notes</button>
         <button class="tab" role="tab" data-tab="todos" aria-selected="false">To-do</button>
         <button class="tab" role="tab" data-tab="snippets" aria-selected="false">Snippets</button>
+        <button class="tab" role="tab" data-tab="clips" aria-selected="false">Clips</button>
       </div>
       <button class="icon" id="close" title="Close the side panel" aria-label="Close the side panel">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17" /></svg>
@@ -98,6 +102,15 @@
       <div class="status" id="snippet-status" role="status"></div>
     </section>
 
+    <section id="clips-section" role="tabpanel" hidden>
+      <div class="row">
+        <button class="primary" id="clip-page" type="button">Clip this page</button>
+        <button class="quiet" id="copy-clips" type="button">Copy all as Markdown</button>
+      </div>
+      <div class="list" id="clip-list"></div>
+      <div class="status" id="clip-status" role="status"></div>
+    </section>
+
     <script>
       "use strict";
       const send = (command) => window.browserBridge.send(JSON.stringify(command));
@@ -109,7 +122,7 @@
         return element;
       };
 
-      let data = { notes: "", todos: [], snippets: [] };
+      let data = { notes: "", todos: [], snippets: [], clips: [] };
       let saveTimer = null;
       let statusTimer = null;
 
@@ -118,7 +131,7 @@
         for (const tab of document.querySelectorAll(".tab")) {
           tab.setAttribute("aria-selected", String(tab.dataset.tab === name));
         }
-        for (const id of ["notes", "todos", "snippets"]) {
+        for (const id of ["notes", "todos", "snippets", "clips"]) {
           byId(`${id}-section`).hidden = id !== name;
         }
         try { sessionStorage.setItem("tab", name); } catch (_) {}
@@ -183,7 +196,7 @@
       // Snippets -----------------------------------------------------------------
       // The text is copied with a hidden field, since a page of this kind can't use the
       // clipboard's own API.
-      function copy(text) {
+      function copy(text, statusId = "snippet-status") {
         const field = make("textarea");
         field.value = text;
         field.style.position = "fixed";
@@ -193,7 +206,7 @@
         let copied = false;
         try { copied = document.execCommand("copy"); } catch (_) {}
         field.remove();
-        flash("snippet-status", copied ? "Copied" : "Couldn't copy");
+        flash(statusId, copied ? "Copied" : "Couldn't copy");
       }
       function renderSnippets() {
         const list = byId("snippet-list");
@@ -229,6 +242,51 @@
         flash("snippet-status", "Saved if this is a web page");
       });
 
+      // Clips -------------------------------------------------------------------
+      function host(url) {
+        try { return new URL(url).hostname.replace(/^www\./, ""); } catch (_) { return ""; }
+      }
+      function renderClips() {
+        const list = byId("clip-list");
+        byId("copy-clips").hidden = data.clips.length === 0;
+        if (data.clips.length === 0) {
+          list.replaceChildren(make("div", "empty", "Nothing clipped yet. Select some text and press Clip this page, or just clip the page."));
+          return;
+        }
+        list.replaceChildren(...data.clips.map((clip) => {
+          const row = make("div", "item snippet");
+          const head = make("div", "head");
+          const open = make("button", "title link", clip.title);
+          open.title = clip.url;
+          open.addEventListener("click", () => send({ type: "openClip", id: clip.id }));
+          const copyLink = make("button", "quiet", "Copy link");
+          copyLink.addEventListener("click", () => copy(clip.url, "clip-status"));
+          const remove = make("button", "icon", "×");
+          remove.title = "Remove";
+          remove.setAttribute("aria-label", "Remove");
+          remove.addEventListener("click", () => send({ type: "removeClip", id: clip.id }));
+          head.append(open, copyLink, remove);
+          const when = new Date(clip.saved_ms).toLocaleDateString();
+          row.append(head, make("div", "body", `${host(clip.url)} · ${when}`));
+          if (clip.note) {
+            row.append(make("div", "body note", clip.note));
+          }
+          return row;
+        }));
+      }
+      // Markdown is plain text, so clips can be pasted into notes, documents or a repository.
+      function markdown() {
+        const escape = (text) => text.replace(/([\[\]\\])/g, "\\$1");
+        return data.clips
+          .map((clip) => {
+            const quote = clip.note ? "\n\n" + clip.note.split("\n").map((line) => `> ${line}`).join("\n") : "";
+            return `## [${escape(clip.title)}](${clip.url})${quote}`;
+          })
+          .join("\n\n");
+      }
+      byId("clip-page").addEventListener("click", () => send({ type: "clipPage" }));
+      byId("copy-clips").addEventListener("click", () => copy(markdown(), "clip-status"));
+
       // What the browser sends: the notes, to-dos and snippets, for every window to share.
       window.onBrowserEvent = (event) => {
         if (event.type !== "panelData") {
@@ -242,6 +300,7 @@
         }
         renderTodos();
         renderSnippets();
+        renderClips();
       };
 
       try { showTab(sessionStorage.getItem("tab") || "notes"); } catch (_) { showTab("notes"); }

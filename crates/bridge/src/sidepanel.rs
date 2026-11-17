@@ -9,6 +9,10 @@ pub const MAX_TODO_CHARS: usize = 300;
 pub const MAX_SNIPPETS: usize = 100;
 pub const MAX_SNIPPET_TITLE_CHARS: usize = 80;
 pub const MAX_SNIPPET_CHARS: usize = 5_000;
+pub const MAX_CLIPS: usize = 300;
+pub const MAX_CLIP_TITLE_CHARS: usize = 200;
+pub const MAX_CLIP_URL_CHARS: usize = 2_000;
+pub const MAX_CLIP_NOTE_CHARS: usize = 2_000;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Todo {
@@ -24,8 +28,35 @@ pub struct Snippet {
     pub text: String,
 }
 
+/// Run in a web page to read what a clip keeps from it: the text selected and the page's
+/// own description. The page's address and title come from the browser, not from here.
+pub const CLIP_SCRIPT: &str = r#"(function () {
+  var cut = function (text, limit) { return String(text || "").slice(0, limit); };
+  var selection = "";
+  try { selection = String(window.getSelection()); } catch (error) {}
+  var description = "";
+  try {
+    var meta = document.querySelector('meta[name="description"], meta[property="og:description"]');
+    description = meta ? meta.getAttribute("content") : "";
+  } catch (error) {}
+  return JSON.stringify({ selection: cut(selection, 4000), description: cut(description, 1000) });
+})()"#;
+
+/// A saved web page: where it is, what it was called, and the text kept from it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Clip {
+    pub id: u32,
+    pub title: String,
+    pub url: String,
+    /// The text that was selected on the page, or its description.
+    pub note: String,
+    pub saved_ms: i64,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SidePanelData {
+    #[serde(default)]
+    pub clips: Vec<Clip>,
     pub notes: String,
     pub todos: Vec<Todo>,
     pub snippets: Vec<Snippet>,
@@ -46,6 +77,22 @@ fn clean_line(text: &str, limit: usize) -> Option<String> {
         .collect();
     let line = line.trim();
     (!line.is_empty()).then(|| clip(line, limit))
+}
+
+/// Text kept from a page: spaces tidied and cut at the limit. Line breaks stay.
+fn clip_note(text: &str) -> String {
+    let tidy: String = text
+        .chars()
+        .map(|char| {
+            if char.is_control() && char != '\n' {
+                ' '
+            } else {
+                char
+            }
+        })
+        .collect();
+    let lines: Vec<&str> = tidy.lines().map(str::trim).collect();
+    clip(lines.join("\n").trim(), MAX_CLIP_NOTE_CHARS)
 }
 
 impl SidePanelData {
@@ -77,11 +124,23 @@ impl SidePanelData {
                 _ => false,
             }
         });
+        data.clips.truncate(MAX_CLIPS);
+        data.clips.retain_mut(|clip| {
+            let web = clip.url.starts_with("https://") || clip.url.starts_with("http://");
+            if !web || clip.url.chars().count() > MAX_CLIP_URL_CHARS {
+                return false;
+            }
+            clip.title =
+                clean_line(&clip.title, MAX_CLIP_TITLE_CHARS).unwrap_or_else(|| clip.url.clone());
+            clip.note = clip_note(&clip.note);
+            true
+        });
         let highest = data
             .todos
             .iter()
             .map(|todo| todo.id)
             .chain(data.snippets.iter().map(|snippet| snippet.id))
+            .chain(data.clips.iter().map(|clip| clip.id))
             .max()
             .unwrap_or(0);
         data.next_id = data.next_id.max(highest);
@@ -159,6 +218,44 @@ impl SidePanelData {
         true
     }
 
+    /// Saves a page at the top. Saving the same address again replaces the earlier clip,
+    /// so a page is only ever kept once. False if it isn't a web page.
+    pub fn add_clip(&mut self, title: &str, url: &str, note: &str, now_ms: i64) -> bool {
+        let web = url.starts_with("https://") || url.starts_with("http://");
+        if !web || url.chars().count() > MAX_CLIP_URL_CHARS {
+            return false;
+        }
+        self.clips.retain(|clip| clip.url != url);
+        if self.clips.len() >= MAX_CLIPS {
+            self.clips.pop();
+        }
+        let id = self.take_id();
+        self.clips.insert(
+            0,
+            Clip {
+                id,
+                title: clean_line(title, MAX_CLIP_TITLE_CHARS).unwrap_or_else(|| url.to_owned()),
+                url: url.to_owned(),
+                note: clip_note(note),
+                saved_ms: now_ms,
+            },
+        );
+        true
+    }
+
+    pub fn remove_clip(&mut self, id: u32) -> bool {
+        let before = self.clips.len();
+        self.clips.retain(|clip| clip.id != id);
+        self.clips.len() != before
+    }
+
+    pub fn clip_url(&self, id: u32) -> Option<&str> {
+        self.clips
+            .iter()
+            .find(|clip| clip.id == id)
+            .map(|clip| clip.url.as_str())
+    }
+
     pub fn remove_snippet(&mut self, id: u32) -> bool {
         let before = self.snippets.len();
         self.snippets.retain(|snippet| snippet.id != id);
@@ -219,6 +316,77 @@ mod tests {
         assert_eq!(data.snippets[0].title, "Sign-off");
         let id = data.snippets[0].id;
         assert!(data.remove_snippet(id) && !data.remove_snippet(id));
+    }
+
+    #[test]
+    fn clips_are_kept_once_per_page_and_newest_first() {
+        let mut data = SidePanelData::default();
+        assert!(data.add_clip("First", "https://a.example/1", "note one", 10));
+        assert!(data.add_clip("Second", "https://b.example/", "", 20));
+        assert!(data.add_clip("First again", "https://a.example/1", "newer note", 30));
+        assert_eq!(data.clips.len(), 2);
+        assert_eq!(data.clips[0].title, "First again");
+        assert_eq!(data.clips[0].note, "newer note");
+        assert_eq!(data.clips[1].title, "Second");
+        let id = data.clips[1].id;
+        assert_eq!(data.clip_url(id), Some("https://b.example/"));
+        assert!(data.remove_clip(id) && !data.remove_clip(id));
+        assert_eq!(data.clip_url(id), None);
+    }
+
+    #[test]
+    fn only_web_pages_can_be_clipped() {
+        let mut data = SidePanelData::default();
+        for url in [
+            "javascript:alert(1)",
+            "data:text/html,hi",
+            "file:///etc/passwd",
+            "about:blank",
+            "",
+        ] {
+            assert!(!data.add_clip("t", url, "", 1), "{url}");
+        }
+        assert!(!data.add_clip(
+            "t",
+            &format!("https://x.example/{}", "a".repeat(2100)),
+            "",
+            1
+        ));
+        assert!(data.clips.is_empty());
+    }
+
+    #[test]
+    fn clip_text_is_tidied_and_limited() {
+        let mut data = SidePanelData::default();
+        data.add_clip(
+            "  \u{7}Title  ",
+            "https://a.example/",
+            "  line one \n\n  line two\u{7} ",
+            1,
+        );
+        assert_eq!(data.clips[0].title, "Title");
+        assert_eq!(data.clips[0].note, "line one\n\nline two");
+        data.add_clip(
+            "",
+            "https://b.example/",
+            &"n".repeat(MAX_CLIP_NOTE_CHARS + 50),
+            2,
+        );
+        assert_eq!(data.clips[0].title, "https://b.example/");
+        assert_eq!(data.clips[0].note.chars().count(), MAX_CLIP_NOTE_CHARS);
+    }
+
+    #[test]
+    fn saved_clips_are_checked_when_read() {
+        let json = r#"{"notes":"","todos":[],"snippets":[],"clips":[
+            {"id":3,"title":"ok","url":"https://a.example/","note":"x","saved_ms":5},
+            {"id":4,"title":"bad","url":"javascript:alert(1)","note":"","saved_ms":5}
+        ],"next_id":0}"#;
+        let data = SidePanelData::parse(json);
+        assert_eq!(data.clips.len(), 1);
+        let mut data = data;
+        data.add_clip("n", "https://b.example/", "", 6);
+        assert_eq!(data.clips[0].id, 4);
     }
 
     #[test]

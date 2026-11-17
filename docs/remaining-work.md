@@ -142,7 +142,8 @@ Built in [milestone-6.md](milestone-6.md). What's left:
 6. **Split view:** test clicking a pane to focus it, a draggable divider, splitting an existing tab, saving the split across restarts, a shortcut key. See the milestone.
 7. **Side panel:** per-workspace notes (a decision), keeping it open between runs, resizing, inserting snippets into pages, search and export, and private windows sharing the notes. See the milestone.
 8. **Command bar:** search bookmarks and history in it, order by recent use, more commands, and a keyboard test of the shortcut. See the milestone.
-9. **Vertical tabs:** groups, search, pinned tabs, resizing by dragging, keyboard navigation, and a real-mouse test of drag reordering. See the milestone.
+9. **Web clipper:** folders and tags, search, saving to a notes folder or Obsidian, clipping an offline copy or a screenshot, frames, and finding the cause of a panel that closed once. See the milestone.
+10. **Vertical tabs:** groups, search, pinned tabs, resizing by dragging, keyboard navigation, and a real-mouse test of drag reordering. See the milestone.
 
 ## How to test on macOS
 
