@@ -71,6 +71,10 @@ pub struct Settings {
     pub ask_download_location: bool,
     /// Unload background tabs that haven't been used for a while.
     pub save_memory: bool,
+    /// Tabs down the left side instead of across the top.
+    pub vertical_tabs: bool,
+    /// The vertical tab list shows only icons.
+    pub sidebar_collapsed: bool,
 }
 
 impl Default for Settings {
@@ -81,6 +85,8 @@ impl Default for Settings {
             startup: StartupMode::default(),
             ask_download_location: false,
             save_memory: true,
+            vertical_tabs: false,
+            sidebar_collapsed: false,
         }
     }
 }
@@ -193,6 +199,9 @@ pub enum PageCommand {
         ask: bool,
     },
     SetSaveMemory {
+        enabled: bool,
+    },
+    SetVerticalTabs {
         enabled: bool,
     },
     UpdateBookmark {

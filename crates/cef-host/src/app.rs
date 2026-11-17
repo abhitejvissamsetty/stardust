@@ -8,8 +8,8 @@ use crate::{
     client::{
         SharedShell, ToolbarClient, adopt_menu_view, clear_window, extension_load_paths,
         load_background_tabs, make_private, make_workspace, prepare_tabs, register_shell,
-        schedule_discard_check, select_tab, set_window, startup_windows, toolbar_height,
-        try_close_all, window_activated,
+        schedule_discard_check, select_tab, set_window, startup_windows, sync_sidebar,
+        toolbar_height, try_close_all, window_activated,
     },
     render::BridgeInstaller,
     ui::toolbar_url,
@@ -297,6 +297,14 @@ wrap_browser_view_delegate! {
     }
 }
 
+wrap_panel_delegate! {
+    struct BodyPanel {}
+
+    impl ViewDelegate {}
+
+    impl PanelDelegate {}
+}
+
 wrap_browser_view_delegate! {
     struct MenuViewHost {}
 
@@ -337,7 +345,24 @@ wrap_window_delegate! {
             };
             let layout = window.set_to_box_layout(Some(&settings));
             window.add_child_view(Some(&mut View::from(toolbar)));
-            set_window(&self.shell, window.clone(), layout);
+            // The pages go in a box of their own, so the vertical tab list can sit
+            // beside them under the toolbar.
+            let Some(body) = panel_create(Some(&mut BodyPanel::new())) else {
+                return;
+            };
+            let body_settings = BoxLayoutSettings {
+                horizontal: 1,
+                cross_axis_alignment: AxisAlignment::STRETCH,
+                ..Default::default()
+            };
+            let body_layout = body.set_to_box_layout(Some(&body_settings));
+            let mut body_view = View::from(&body);
+            window.add_child_view(Some(&mut body_view));
+            if let Some(layout) = &layout {
+                layout.set_flex_for_view(Some(&mut body_view), 1);
+            }
+            set_window(&self.shell, window.clone(), body, body_layout);
+            sync_sidebar(&self.shell);
             select_tab(&self.shell, self.first_tab);
             load_background_tabs(&self.shell);
             window.show();

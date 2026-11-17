@@ -91,6 +91,16 @@ pub enum UiCommand {
     WindowAction {
         action: WindowAction,
     },
+    /// The vertical tab list's page has loaded and can be sent the tabs.
+    SidebarReady,
+    /// Moves the tabs to the left side, or back to the top.
+    SetVerticalTabs {
+        enabled: bool,
+    },
+    /// Shrinks the vertical tab list to icons, or widens it again.
+    SetSidebarCollapsed {
+        collapsed: bool,
+    },
     NewWindow,
     NewPrivateWindow,
     /// Shows a workspace's window, or opens it with the tabs it had.
@@ -129,6 +139,25 @@ pub enum UiCommand {
     GetWindowState,
 }
 
+impl UiCommand {
+    /// What the vertical tab list's page may ask for. It's a second page the browser
+    /// trusts, so it gets only what a tab list needs, not the whole set.
+    pub fn allowed_from_sidebar(&self) -> bool {
+        matches!(
+            self,
+            Self::SidebarReady
+                | Self::NewTab
+                | Self::SelectTab { .. }
+                | Self::CloseTab { .. }
+                | Self::MoveTab { .. }
+                | Self::ToggleMuteTab { .. }
+                | Self::SetVerticalTabs { .. }
+                | Self::SetSidebarCollapsed { .. }
+                | Self::OpenWorkspace { .. }
+        )
+    }
+}
+
 /// What the person asked of the window, as Chrome's title bar and menus do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -163,6 +192,11 @@ pub enum UiEvent<'a> {
         items: &'a [serde_json::Value],
         /// Private windows don't run extensions.
         available: bool,
+    },
+    /// Where the tabs are shown, for the toolbar and the vertical tab list.
+    Layout {
+        vertical: bool,
+        collapsed: bool,
     },
     /// The workspaces to switch between, and the one this window belongs to.
     Workspaces {
@@ -246,6 +280,26 @@ mod tests {
             serde_json::from_str::<UiCommand>(r#"{"type":"back"}"#).unwrap(),
             UiCommand::Back
         );
+    }
+
+    #[test]
+    fn the_sidebar_may_only_ask_for_tab_things() {
+        let allowed = |json: &str| {
+            serde_json::from_str::<UiCommand>(json)
+                .unwrap()
+                .allowed_from_sidebar()
+        };
+        assert!(allowed(r#"{"type":"selectTab","id":1}"#));
+        assert!(allowed(r#"{"type":"closeTab","id":1}"#));
+        assert!(allowed(r#"{"type":"moveTab","id":1,"index":0}"#));
+        assert!(allowed(r#"{"type":"newTab"}"#));
+        assert!(!allowed(r#"{"type":"navigate","input":"example.com"}"#));
+        assert!(!allowed(
+            r#"{"type":"openDownload","id":0,"confirmed":true}"#
+        ));
+        assert!(!allowed(r#"{"type":"openPage","page":"settings"}"#));
+        assert!(!allowed(r#"{"type":"quit"}"#));
+        assert!(!allowed(r#"{"type":"ready"}"#));
     }
 
     #[test]

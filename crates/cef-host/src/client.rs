@@ -27,7 +27,7 @@ use crate::{
     app::{open_window, open_window_in},
     data_dir, passwords,
     render::{FILL_LOGIN_MESSAGE, LOGIN_SUBMITTED_MESSAGE, UI_COMMAND_MESSAGE},
-    ui::{MENU_FRAME_NAME, internal_page_for_url, internal_url, toolbar_url},
+    ui::{MENU_FRAME_NAME, internal_page_for_url, internal_url, sidebar_url, toolbar_url},
 };
 
 const ERR_ABORTED: i32 = -3;
@@ -42,6 +42,10 @@ const SETTING_HOMEPAGE: &str = "homepage";
 const SETTING_STARTUP: &str = "startup";
 const SETTING_SESSION: &str = "session";
 const TOOLBAR_HEIGHT: i32 = 88;
+/// The row of tabs across the top, which goes away when the tabs are down the side.
+const TAB_ROW_HEIGHT: i32 = 40;
+const SIDEBAR_WIDTH: i32 = 264;
+const SIDEBAR_COLLAPSED_WIDTH: i32 = 56;
 const DOWNLOAD_BAR_HEIGHT: i32 = 44;
 const FIND_BAR_HEIGHT: i32 = 44;
 const BOOKMARKS_BAR_HEIGHT: i32 = 34;
@@ -52,6 +56,8 @@ const SUGGESTION_LIMIT: usize = 6;
 const BOOKMARKS_BAR_LIMIT: u32 = 200;
 const SETTING_ASK_DOWNLOAD_LOCATION: &str = "ask_download_location";
 const SETTING_SAVE_MEMORY: &str = "save_memory";
+const SETTING_VERTICAL_TABS: &str = "vertical_tabs";
+const SETTING_SIDEBAR_COLLAPSED: &str = "sidebar_collapsed";
 const CLEAR_ORIGIN_LIMIT: u32 = 2000;
 const SETTING_SITE_PERMISSIONS: &str = "site_permissions";
 const SETTING_EXTENSIONS: &str = "extensions";
@@ -139,6 +145,13 @@ pub struct Shell {
     /// A private window. Its pages use a profile that lives in memory, and nothing it
     /// does is saved: no history, session, downloads list or passwords.
     private: bool,
+    /// The box that holds the pages, and beside them the vertical tab list when it's on.
+    body: Option<Panel>,
+    /// The vertical tab list: its browser, the view that holds it, and whether its page
+    /// has loaded and can be sent the tabs.
+    sidebar: Option<Browser>,
+    sidebar_view: Option<BrowserView>,
+    sidebar_ready: bool,
     /// The workspace this window belongs to. Empty is the main one, which uses the
     /// browser's original profile; any other has a profile of its own on disk.
     workspace: String,
@@ -240,6 +253,8 @@ fn saved_data() -> &'static SavedData {
                 .unwrap_or(defaults.startup),
             ask_download_location: saved(SETTING_ASK_DOWNLOAD_LOCATION).as_deref() == Some("1"),
             save_memory: saved(SETTING_SAVE_MEMORY).as_deref() != Some("0"),
+            vertical_tabs: saved(SETTING_VERTICAL_TABS).as_deref() == Some("1"),
+            sidebar_collapsed: saved(SETTING_SIDEBAR_COLLAPSED).as_deref() == Some("1"),
         };
         let permissions = saved(SETTING_SITE_PERMISSIONS)
             .map(|json| SitePermissions::parse(&json))
@@ -571,14 +586,13 @@ fn publish(shell: &SharedShell) {
             shell.private,
         )
     };
-    send_to_toolbar(
-        toolbar.as_ref(),
-        &UiEvent::Tabs {
-            strip: &strip,
-            window_id,
-            private,
-        },
-    );
+    let event = UiEvent::Tabs {
+        strip: &strip,
+        window_id,
+        private,
+    };
+    send_to_toolbar(toolbar.as_ref(), &event);
+    send_to_toolbar(sidebar_of(shell).as_ref(), &event);
     save_session();
 }
 
@@ -707,13 +721,12 @@ fn publish_workspaces(shell: &SharedShell) {
         )
     };
     let items = workspace_items();
-    send_to_toolbar(
-        toolbar.as_ref(),
-        &UiEvent::Workspaces {
-            items: &items,
-            current: &current,
-        },
-    );
+    let event = UiEvent::Workspaces {
+        items: &items,
+        current: &current,
+    };
+    send_to_toolbar(toolbar.as_ref(), &event);
+    send_to_toolbar(sidebar_of(shell).as_ref(), &event);
 }
 
 fn publish_workspaces_everywhere() {
@@ -903,8 +916,9 @@ pub fn prepare_tabs(
 
 /// The toolbar view's height, which includes any bars that are showing.
 pub fn toolbar_height(shell: &SharedShell) -> i32 {
+    let vertical = settings().vertical_tabs;
     let shell = lock(shell);
-    TOOLBAR_HEIGHT
+    TOOLBAR_HEIGHT - if vertical { TAB_ROW_HEIGHT } else { 0 }
         + if shell.download_bar_shown {
             DOWNLOAD_BAR_HEIGHT
         } else {
@@ -1958,17 +1972,17 @@ fn store_view(shell: &SharedShell, id: TabId, view: BrowserView) {
 
 /// Adds a tab's view to the window and shows it. Called once the window exists.
 pub fn attach_tab(shell: &SharedShell, id: TabId) {
-    let (window, layout, view) = {
+    let (body, layout, view) = {
         let shell = lock(shell);
         (
-            shell.window.clone(),
+            shell.body.clone(),
             shell.layout.clone(),
             shell.handles.get(&id).map(|handles| handles.view.clone()),
         )
     };
-    if let (Some(window), Some(view)) = (window, view) {
+    if let (Some(body), Some(view)) = (body, view) {
         let mut view = View::from(&view);
-        window.add_child_view(Some(&mut view));
+        body.add_child_view(Some(&mut view));
         if let Some(layout) = layout {
             layout.set_flex_for_view(Some(&mut view), 1);
         }
@@ -1976,9 +1990,11 @@ pub fn attach_tab(shell: &SharedShell, id: TabId) {
     select_tab(shell, id);
 }
 
-pub fn set_window(shell: &SharedShell, window: Window, layout: Option<BoxLayout>) {
+/// `body` holds the pages, with `layout` as its layout.
+pub fn set_window(shell: &SharedShell, window: Window, body: Panel, layout: Option<BoxLayout>) {
     let mut shell = lock(shell);
     shell.window = Some(window);
+    shell.body = Some(body);
     shell.layout = layout;
 }
 
@@ -2118,10 +2134,10 @@ fn remove_tab(shell: &SharedShell, id: TabId) {
         shell.audible.remove(&id);
         shell.discarding.remove(&id);
         shell.keep_loaded.remove(&id);
-        (shell.window.clone(), view, shell.strip.active_id())
+        (shell.body.clone(), view, shell.strip.active_id())
     };
-    if let (Some(window), Some(view)) = (window, view) {
-        window.remove_child_view(Some(&mut View::from(&view)));
+    if let (Some(body), Some(view)) = (window, view) {
+        body.remove_child_view(Some(&mut View::from(&view)));
     }
     if let Some(next) = next {
         select_tab(shell, next);
@@ -2143,6 +2159,7 @@ fn run_command(shell: &SharedShell, command: UiCommand) {
             publish_bookmarks_bar();
             publish_extensions(shell);
             publish_workspaces(shell);
+            publish_layout(shell);
             send_known_favicons(shell);
             // A new window's first tab was shown before its toolbar could take focus.
             let is_blank = lock(shell)
@@ -2252,6 +2269,10 @@ fn run_command(shell: &SharedShell, command: UiCommand) {
         ),
         UiCommand::NewPrivateWindow => open_window(None, &[BLANK_PAGE.to_owned()], true),
         UiCommand::OpenWorkspace { id } => open_workspace(&id),
+        // Only the tab list sends this, and it's handled where it arrives.
+        UiCommand::SidebarReady => {}
+        UiCommand::SetVerticalTabs { enabled } => set_vertical_tabs(enabled),
+        UiCommand::SetSidebarCollapsed { collapsed } => set_sidebar_collapsed(collapsed),
         UiCommand::OpenFind => open_find(shell),
         UiCommand::Quit => close_all_browsers(),
         UiCommand::ReopenClosedTab => reopen_closed_tab(shell),
@@ -2470,6 +2491,7 @@ fn run_page_command(shell: &SharedShell, frame: &Frame, command: PageCommand) {
                 storage.set_setting(SETTING_SAVE_MEMORY, if enabled { "1" } else { "0" })
             });
         }
+        PageCommand::SetVerticalTabs { enabled } => set_vertical_tabs(enabled),
         PageCommand::SetAskDownloadLocation { ask } => {
             settings().ask_download_location = ask;
             with_storage(|storage| {
@@ -2819,6 +2841,8 @@ pub fn try_close_all(shell: &SharedShell) -> bool {
 pub fn clear_window(shell: &SharedShell) {
     let mut shell = lock(shell);
     shell.window = None;
+    shell.body = None;
+    shell.sidebar_view = None;
     shell.layout = None;
     shell.popup_overlay = None;
     shell.popup_view = None;
@@ -4051,10 +4075,10 @@ fn finish_discard(shell: &SharedShell, id: TabId) {
         // As when closing a tab, dropping these references is what lets the browser
         // finish closing and its renderer process exit.
         let view = guard.handles.remove(&id).map(|handles| handles.view);
-        (guard.window.clone(), view)
+        (guard.body.clone(), view)
     };
-    if let (Some(window), Some(view)) = (window, view) {
-        window.remove_child_view(Some(&mut View::from(&view)));
+    if let (Some(body), Some(view)) = (window, view) {
+        body.remove_child_view(Some(&mut View::from(&view)));
     }
     update_tab(shell, id, |tab| {
         tab.page.is_loading = false;
@@ -4070,24 +4094,314 @@ pub fn load_background_tabs(shell: &SharedShell) {
             continue;
         };
         create_view(shell, id, &url);
-        let (window, layout, view) = {
+        let (body, layout, view) = {
             let guard = lock(shell);
             (
-                guard.window.clone(),
+                guard.body.clone(),
                 guard.layout.clone(),
                 guard.handles.get(&id).map(|handles| handles.view.clone()),
             )
         };
-        if let (Some(window), Some(view)) = (window, view) {
+        if let (Some(body), Some(view)) = (body, view) {
             let mut view = View::from(&view);
             view.set_visible(0);
-            window.add_child_view(Some(&mut view));
+            body.add_child_view(Some(&mut view));
             if let Some(layout) = layout {
                 layout.set_flex_for_view(Some(&mut view), 1);
             }
         }
     }
     publish(shell);
+}
+
+// -- The vertical tab list -------------------------------------------------------------
+
+/// The vertical tab list's browser, once its page has loaded and can take events.
+fn sidebar_of(shell: &SharedShell) -> Option<Browser> {
+    let guard = lock(shell);
+    guard.sidebar.clone().filter(|_| guard.sidebar_ready)
+}
+
+fn sidebar_width() -> i32 {
+    if settings().sidebar_collapsed {
+        SIDEBAR_COLLAPSED_WIDTH
+    } else {
+        SIDEBAR_WIDTH
+    }
+}
+
+/// Tells the toolbar and the tab list where the tabs are shown.
+fn publish_layout(shell: &SharedShell) {
+    let (vertical, collapsed) = {
+        let settings = settings();
+        (settings.vertical_tabs, settings.sidebar_collapsed)
+    };
+    let toolbar = {
+        let guard = lock(shell);
+        guard.toolbar.clone().filter(|_| guard.toolbar_ready)
+    };
+    let event = UiEvent::Layout {
+        vertical,
+        collapsed,
+    };
+    send_to_toolbar(toolbar.as_ref(), &event);
+    send_to_toolbar(sidebar_of(shell).as_ref(), &event);
+}
+
+/// Makes the window match the setting: adds the tab list beside the pages when tabs are
+/// vertical, or takes it away when they aren't, and resizes the toolbar to suit.
+pub fn sync_sidebar(shell: &SharedShell) {
+    let vertical = settings().vertical_tabs;
+    let (body, has_view) = {
+        let guard = lock(shell);
+        (guard.body.clone(), guard.sidebar_view.is_some())
+    };
+    let Some(body) = body else {
+        return;
+    };
+    if vertical && !has_view {
+        let mut client = SidebarClient::new(shell.clone());
+        let view = browser_view_create(
+            Some(&mut client),
+            Some(&CefString::from(sidebar_url())),
+            Some(&BrowserSettings::default()),
+            None,
+            None,
+            Some(&mut SidebarViewHost::new()),
+        );
+        if let Some(view) = view {
+            // First in the box, so the pages take the rest of the width.
+            body.add_child_view_at(Some(&mut View::from(&view)), 0);
+            lock(shell).sidebar_view = Some(view);
+        }
+    } else if !vertical && has_view {
+        let (view, browser) = {
+            let mut guard = lock(shell);
+            guard.sidebar_ready = false;
+            (guard.sidebar_view.take(), guard.sidebar.clone())
+        };
+        if let Some(view) = &view {
+            body.remove_child_view(Some(&mut View::from(view)));
+        }
+        // The browser's closing calls back into code that locks, so nothing's held here.
+        if let Some(host) = browser.and_then(|browser| browser.host()) {
+            host.close_browser(1);
+        }
+    }
+    resize_toolbar(shell);
+    publish_layout(shell);
+}
+
+/// Applies a change of the setting to every window.
+fn sync_sidebars_everywhere() {
+    for shell in open_windows() {
+        sync_sidebar(&shell);
+    }
+}
+
+/// Resizes the tab list in every window, after it was collapsed or widened.
+fn resize_sidebars_everywhere() {
+    for shell in open_windows() {
+        let (view, window) = {
+            let guard = lock(&shell);
+            (guard.sidebar_view.clone(), guard.window.clone())
+        };
+        if let Some(view) = view {
+            View::from(&view).invalidate_layout();
+        }
+        if let Some(window) = window {
+            window.layout();
+        }
+        publish_layout(&shell);
+    }
+}
+
+fn set_vertical_tabs(enabled: bool) {
+    {
+        let mut settings = settings();
+        if settings.vertical_tabs == enabled {
+            return;
+        }
+        settings.vertical_tabs = enabled;
+    }
+    with_storage(|storage| {
+        storage.set_setting(SETTING_VERTICAL_TABS, if enabled { "1" } else { "0" })
+    });
+    // Not now: this runs inside a message from a toolbar, and that window's toolbar
+    // wouldn't take its new height until the message was done.
+    post_task(ThreadId::UI, Some(&mut SyncSidebars::new()));
+}
+
+wrap_task! {
+    struct SyncSidebars;
+
+    impl Task {
+        fn execute(&self) {
+            sync_sidebars_everywhere();
+        }
+    }
+}
+
+fn set_sidebar_collapsed(collapsed: bool) {
+    {
+        let mut settings = settings();
+        if settings.sidebar_collapsed == collapsed {
+            return;
+        }
+        settings.sidebar_collapsed = collapsed;
+    }
+    with_storage(|storage| {
+        storage.set_setting(SETTING_SIDEBAR_COLLAPSED, if collapsed { "1" } else { "0" })
+    });
+    resize_sidebars_everywhere();
+}
+
+wrap_browser_view_delegate! {
+    struct SidebarViewHost {}
+
+    impl ViewDelegate {
+        // Only the width matters: the box stretches the list to the window's height.
+        fn preferred_size(&self, _view: Option<&mut View>) -> Size {
+            Size { width: sidebar_width(), height: 100 }
+        }
+    }
+
+    impl BrowserViewDelegate {
+        fn browser_runtime_style(&self) -> RuntimeStyle {
+            RuntimeStyle::ALLOY
+        }
+    }
+}
+
+// The vertical tab list's client. The browser trusts what it sends, so it's held to
+// the commands a tab list needs.
+wrap_client! {
+    pub struct SidebarClient {
+        shell: SharedShell,
+    }
+
+    impl Client {
+        fn life_span_handler(&self) -> Option<LifeSpanHandler> {
+            Some(SidebarLifeSpan::new(self.shell.clone()))
+        }
+
+        fn keyboard_handler(&self) -> Option<KeyboardHandler> {
+            Some(Shortcuts::new(self.shell.clone()))
+        }
+
+        fn request_handler(&self) -> Option<RequestHandler> {
+            Some(SidebarRequests::new())
+        }
+
+        fn on_process_message_received(
+            &self,
+            _browser: Option<&mut Browser>,
+            _frame: Option<&mut Frame>,
+            _source_process: ProcessId,
+            message: Option<&mut ProcessMessage>,
+        ) -> i32 {
+            let Some(message) = message else {
+                return 0;
+            };
+            if CefString::from(&message.name()).to_string() != UI_COMMAND_MESSAGE {
+                return 0;
+            }
+            let json = message
+                .argument_list()
+                .map(|list| CefString::from(&list.string(0)).to_string())
+                .unwrap_or_default();
+            match serde_json::from_str::<UiCommand>(&json) {
+                Ok(UiCommand::SidebarReady) => {
+                    lock(&self.shell).sidebar_ready = true;
+                    publish(&self.shell);
+                    publish_layout(&self.shell);
+                    publish_workspaces(&self.shell);
+                    send_known_favicons(&self.shell);
+                }
+                Ok(command) if command.allowed_from_sidebar() => run_command(&self.shell, command),
+                _ => {}
+            }
+            1
+        }
+    }
+}
+
+wrap_life_span_handler! {
+    struct SidebarLifeSpan {
+        shell: SharedShell,
+    }
+
+    impl LifeSpanHandler {
+        fn on_after_created(&self, browser: Option<&mut Browser>) {
+            let mut shell = lock(&self.shell);
+            shell.sidebar = browser.cloned();
+            shell.open_browsers += 1;
+        }
+
+        // The tab list opens no windows.
+        fn on_before_popup(
+            &self,
+            _browser: Option<&mut Browser>,
+            _frame: Option<&mut Frame>,
+            _popup_id: i32,
+            _target_url: Option<&CefString>,
+            _target_frame_name: Option<&CefString>,
+            _target_disposition: WindowOpenDisposition,
+            _user_gesture: i32,
+            _popup_features: Option<&PopupFeatures>,
+            _window_info: Option<&mut WindowInfo>,
+            _client: Option<&mut Option<Client>>,
+            _settings: Option<&mut BrowserSettings>,
+            _extra_info: Option<&mut Option<DictionaryValue>>,
+            _no_javascript_access: Option<&mut i32>,
+        ) -> i32 {
+            1
+        }
+
+        // Like a tab, the list's view lives in the window, which must stay open when it
+        // closes. Letting go of the view is what lets the browser finish.
+        fn do_close(&self, _browser: Option<&mut Browser>) -> i32 {
+            let view = {
+                let mut shell = lock(&self.shell);
+                if shell.window_closing {
+                    return 0;
+                }
+                shell.sidebar_ready = false;
+                shell.sidebar_view.take()
+            };
+            drop(view);
+            1
+        }
+
+        fn on_before_close(&self, _browser: Option<&mut Browser>) {
+            {
+                let mut shell = lock(&self.shell);
+                shell.sidebar = None;
+                shell.sidebar_ready = false;
+            }
+            browser_closed(&self.shell, Some(TabId::MAX), None);
+        }
+    }
+}
+
+wrap_request_handler! {
+    struct SidebarRequests {}
+
+    impl RequestHandler {
+        // The tab list only ever shows its own page, because the browser acts on what
+        // it sends. A dropped link, even to another `data:` page, is refused.
+        fn on_before_browse(
+            &self,
+            _browser: Option<&mut Browser>,
+            _frame: Option<&mut Frame>,
+            request: Option<&mut Request>,
+            _user_gesture: i32,
+            _is_redirect: i32,
+        ) -> i32 {
+            let url = request.map(|request| CefString::from(&request.url()).to_string());
+            (url.as_deref() != Some(sidebar_url())).into()
+        }
+    }
 }
 
 // -- Things the toolbar and its menu ask for ---------------------------------------------
@@ -4482,7 +4796,9 @@ fn send_favicon(shell: &SharedShell, url: &str, data: &str) {
         let guard = lock(shell);
         guard.toolbar.clone().filter(|_| guard.toolbar_ready)
     };
-    send_to_toolbar(toolbar.as_ref(), &UiEvent::Favicon { url, data });
+    let event = UiEvent::Favicon { url, data };
+    send_to_toolbar(toolbar.as_ref(), &event);
+    send_to_toolbar(sidebar_of(shell).as_ref(), &event);
 }
 
 /// A toolbar that has just started needs the icons this window already has.

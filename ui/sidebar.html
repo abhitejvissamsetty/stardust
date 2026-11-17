@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
+    <title>Tabs</title>
+    <style>
+      /*TOKENS*/
+      * { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; overflow: hidden; }
+      body {
+        background: var(--tab-row);
+        border-right: 1px solid var(--divider);
+        color: var(--text);
+        display: flex;
+        flex-direction: column;
+        font: var(--text-sm) var(--font-ui);
+        user-select: none;
+      }
+      button { font: inherit; }
+      .top { align-items: center; display: flex; gap: var(--space-1); padding: var(--space-2); }
+      .new {
+        align-items: center; background: var(--field); border: 0; border-radius: var(--radius-sm); color: var(--text);
+        display: flex; flex: 1; gap: var(--space-2); height: 34px; min-width: 0; padding: 0 var(--space-3);
+      }
+      .new:hover { background: var(--press); }
+      .icon {
+        align-items: center; background: transparent; border: 0; border-radius: 6px; color: var(--text-muted);
+        display: flex; flex: none; height: 28px; justify-content: center; padding: 0; width: 28px;
+      }
+      .icon:hover { background: var(--hover); color: var(--text); }
+      svg { fill: none; flex: none; height: 16px; stroke: currentcolor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.75; width: 16px; }
+      .context { align-items: center; color: var(--text-muted); display: flex; font-size: 12px; gap: var(--space-2); height: 24px; padding: 0 var(--space-3); }
+      .context[hidden] { display: none; }
+      .context .dot { background: var(--ws-blue); border-radius: 999px; flex: none; height: 10px; width: 10px; }
+      .context .dot[data-color="green"] { background: var(--ws-green); }
+      .context .dot[data-color="red"] { background: var(--ws-red); }
+      .context .dot[data-color="amber"] { background: var(--ws-amber); }
+      .context .dot[data-color="purple"] { background: var(--ws-purple); }
+      .context .dot[data-color="pink"] { background: var(--ws-pink); }
+      .context .dot[data-color="teal"] { background: var(--ws-teal); }
+      .context .dot[data-color="gray"] { background: var(--ws-gray); }
+      .context .name, .context .private { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .context .private { color: var(--accent); }
+      .list { flex: 1; overflow-x: hidden; overflow-y: auto; padding: var(--space-1) var(--space-2) var(--space-2); }
+      .tab {
+        align-items: center; border-radius: var(--radius-sm); cursor: default; display: flex; gap: var(--space-2);
+        height: 36px; padding: 0 var(--space-2); position: relative;
+      }
+      .tab:hover { background: var(--hover); }
+      .tab[aria-selected="true"] { background: var(--surface); box-shadow: 0 1px 2px rgb(0 0 0 / 12%); }
+      .tab[aria-selected="true"]::before { background: var(--accent); border-radius: 2px; content: ""; height: 16px; left: 0; position: absolute; width: 3px; }
+      .tab.discarded .title, .tab.discarded .picture { opacity: 0.55; }
+      .tab.drop-before::after, .tab.drop-after::after { background: var(--accent); content: ""; height: 2px; left: 6px; position: absolute; right: 6px; }
+      .tab.drop-before::after { top: -1px; }
+      .tab.drop-after::after { bottom: -1px; }
+      .icon-slot { align-items: center; display: flex; flex: none; height: 18px; justify-content: center; width: 18px; }
+      .picture { border-radius: 3px; height: 16px; width: 16px; }
+      .fallback { color: var(--text-muted); }
+      .spinner { animation: spin 0.8s linear infinite; border: 2px solid var(--divider); border-radius: 50%; border-top-color: var(--accent); height: 14px; width: 14px; }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      .title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .tab .icon { height: 24px; width: 24px; }
+      .tab .close { opacity: 0; }
+      .tab:hover .close, .tab[aria-selected="true"] .close { opacity: 1; }
+      [hidden] { display: none !important; }
+
+      /* Collapsed: icons only. */
+      body[data-collapsed] .new .label, body[data-collapsed] .title, body[data-collapsed] .close,
+      body[data-collapsed] .context .name, body[data-collapsed] .tab .audio { display: none; }
+      body[data-collapsed] .top { flex-direction: column; }
+      body[data-collapsed] .new { flex: none; justify-content: center; padding: 0; width: 100%; }
+      body[data-collapsed] .tab { justify-content: center; padding: 0; }
+      body[data-collapsed] .context { justify-content: center; padding: 0; }
+      body[data-collapsed] .collapse svg { transform: rotate(180deg); }
+      @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+    </style>
+  </head>
+  <body>
+    <div class="top">
+      <button class="new" id="new" title="New tab" aria-label="New tab">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+        <span class="label">New tab</span>
+      </button>
+      <button class="icon collapse" id="collapse" title="Collapse the tab list" aria-label="Collapse the tab list">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 6l-6 6 6 6" /></svg>
+      </button>
+    </div>
+    <div class="context" id="context" hidden>
+      <span class="dot" id="dot" data-color="blue"></span>
+      <span class="name" id="name"></span>
+      <span class="private" id="private" hidden>Private</span>
+    </div>
+    <div class="list" id="list" role="tablist" aria-label="Tabs" aria-orientation="vertical"></div>
+    <script>
+      "use strict";
+      const send = (command) => window.browserBridge.send(JSON.stringify(command));
+      const byId = (id) => document.getElementById(id);
+      const list = byId("list");
+
+      const GLOBE = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5" /><path d="M3.5 12h17M12 3.5c2.5 2.4 3.5 5.2 3.5 8.5s-1 6.1-3.5 8.5c-2.5-2.4-3.5-5.2-3.5-8.5s1-6.1 3.5-8.5z" /></svg>';
+      const SPEAKER = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z" /><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11" /></svg>';
+      const MUTED = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z" /><path d="M16 9.5l5 5M21 9.5l-5 5" /></svg>';
+      const CLOSE = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17" /></svg>';
+
+      let strip = { tabs: [], activeId: null };
+      const favicons = new Map();
+      let collapsed = false;
+      let dragId = null;
+
+      const shownUrl = (url) => (url === "about:blank" ? "" : url);
+      function label(tab) {
+        const blank = !shownUrl(tab.url);
+        const hasTitle = tab.title && tab.title !== "about:blank";
+        return blank ? "New tab" : hasTitle ? tab.title : tab.url;
+      }
+
+      function make(id) {
+        const element = document.createElement("div");
+        element.className = "tab";
+        element.dataset.id = id;
+        element.setAttribute("role", "tab");
+        element.draggable = true;
+        const slot = document.createElement("span");
+        slot.className = "icon-slot";
+        const spinner = Object.assign(document.createElement("span"), { className: "spinner" });
+        const picture = Object.assign(document.createElement("img"), { className: "picture", alt: "" });
+        const fallback = Object.assign(document.createElement("span"), { className: "fallback", innerHTML: GLOBE });
+        slot.append(spinner, picture, fallback);
+        const title = Object.assign(document.createElement("span"), { className: "title" });
+        const audio = Object.assign(document.createElement("button"), { className: "icon audio" });
+        const close = Object.assign(document.createElement("button"), { className: "icon close", innerHTML: CLOSE, title: "Close tab" });
+        close.setAttribute("aria-label", "Close tab");
+        element.append(slot, title, audio, close);
+        element.addEventListener("click", () => send({ type: "selectTab", id }));
+        element.addEventListener("auxclick", (event) => {
+          if (event.button === 1) {
+            send({ type: "closeTab", id });
+          }
+        });
+        audio.addEventListener("click", (event) => {
+          event.stopPropagation();
+          send({ type: "toggleMuteTab", id });
+        });
+        close.addEventListener("click", (event) => {
+          event.stopPropagation();
+          send({ type: "closeTab", id });
+        });
+        element.addEventListener("dragstart", (event) => {
+          dragId = id;
+          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.setData("text/plain", "");
+        });
+        element.addEventListener("dragend", () => {
+          dragId = null;
+          clearDrop();
+        });
+        element.addEventListener("dragover", (event) => {
+          if (dragId === null) {
+            return;
+          }
+          event.preventDefault();
+          const box = element.getBoundingClientRect();
+          const before = event.clientY < box.top + box.height / 2;
+          clearDrop();
+          element.classList.add(before ? "drop-before" : "drop-after");
+        });
+        element.addEventListener("drop", (event) => {
+          if (dragId === null) {
+            return;
+          }
+          event.preventDefault();
+          const box = element.getBoundingClientRect();
+          const before = event.clientY < box.top + box.height / 2;
+          const ids = strip.tabs.map((tab) => tab.id);
+          const target = ids.indexOf(id);
+          const from = ids.indexOf(dragId);
+          let index = target + (before ? 0 : 1);
+          if (from < index) {
+            index -= 1;
+          }
+          if (from !== -1 && index !== from) {
+            send({ type: "moveTab", id: dragId, index });
+          }
+          dragId = null;
+          clearDrop();
+        });
+        return element;
+      }
+
+      function clearDrop() {
+        for (const element of list.querySelectorAll(".drop-before, .drop-after")) {
+          element.classList.remove("drop-before", "drop-after");
+        }
+      }
+
+      function render() {
+        const existing = new Map([...list.children].map((child) => [Number(child.dataset.id), child]));
+        for (const tab of strip.tabs) {
+          const element = existing.get(tab.id) || make(tab.id);
+          existing.delete(tab.id);
+          // Page titles are untrusted, so they're only ever set as text.
+          const text = label(tab);
+          element.querySelector(".title").textContent = text;
+          element.title = text;
+          element.setAttribute("aria-selected", String(tab.id === strip.activeId));
+          element.classList.toggle("discarded", Boolean(tab.discarded));
+          const data = tab.favicon ? favicons.get(tab.favicon) : null;
+          const picture = element.querySelector(".picture");
+          element.querySelector(".spinner").hidden = !tab.isLoading;
+          picture.hidden = tab.isLoading || !data;
+          if (data && picture.getAttribute("src") !== data) {
+            picture.src = data;
+          }
+          element.querySelector(".fallback").hidden = tab.isLoading || Boolean(data);
+          const audio = element.querySelector(".audio");
+          audio.hidden = !tab.audible && !tab.muted;
+          audio.innerHTML = tab.muted ? MUTED : SPEAKER;
+          audio.title = tab.muted ? "Unmute tab" : "Mute tab";
+          audio.setAttribute("aria-label", audio.title);
+          list.append(element);
+        }
+        for (const element of existing.values()) {
+          element.remove();
+        }
+      }
+
+      function showCollapsed() {
+        document.body.toggleAttribute("data-collapsed", collapsed);
+        const text = collapsed ? "Widen the tab list" : "Collapse the tab list";
+        byId("collapse").title = text;
+        byId("collapse").setAttribute("aria-label", text);
+      }
+
+      function showContext(name, color) {
+        const hasName = Boolean(name);
+        byId("name").textContent = name || "";
+        byId("dot").dataset.color = color || "blue";
+        byId("dot").hidden = !hasName;
+        byId("context").hidden = !hasName && byId("private").hidden;
+      }
+
+      window.onBrowserEvent = (event) => {
+        if (event.type === "tabs") {
+          strip = event.strip;
+          document.documentElement.toggleAttribute("data-private", Boolean(event.private));
+          byId("private").hidden = !event.private;
+          if (event.private) {
+            showContext("", "");
+            byId("context").hidden = false;
+          }
+          if (!dragId) {
+            render();
+          }
+          list.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
+        } else if (event.type === "favicon") {
+          favicons.set(event.url, event.data);
+          render();
+        } else if (event.type === "layout") {
+          collapsed = event.collapsed;
+          showCollapsed();
+        } else if (event.type === "workspaces") {
+          const current = event.items.find((item) => item.id === event.current);
+          // The main workspace isn't named unless there are others to tell it from.
+          if (current && event.items.length > 1) {
+            showContext(current.name, current.color);
+          } else {
+            showContext("", "");
+          }
+        }
+      };
+
+      byId("new").addEventListener("click", () => send({ type: "newTab" }));
+      byId("collapse").addEventListener("click", () => send({ type: "setSidebarCollapsed", collapsed: !collapsed }));
+      send({ type: "sidebarReady" });
+    </script>
+  </body>
+</html>

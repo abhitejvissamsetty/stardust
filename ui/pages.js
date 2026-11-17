@@ -540,6 +540,7 @@ window.onBrowserEvent = (event) => {
     byId("startup").value = event.settings.startup;
     byId("ask-download").checked = event.settings.askDownloadLocation;
     byId("save-memory").checked = event.settings.saveMemory;
+    byId("vertical-tabs").checked = event.settings.verticalTabs;
     if (document.activeElement !== byId("homepage")) {
       byId("homepage").value = event.settings.homepage;
     }
@@ -651,6 +652,9 @@ if (page === "settings") {
   byId("restart-update").addEventListener("click", () => send({ type: "restartToUpdate" }));
   byId("ask-download").addEventListener("change", (event) => {
     send({ type: "setAskDownloadLocation", ask: event.target.checked });
+  });
+  byId("vertical-tabs").addEventListener("change", (event) => {
+    send({ type: "setVerticalTabs", enabled: event.target.checked });
   });
   byId("save-memory").addEventListener("change", (event) => {
     send({ type: "setSaveMemory", enabled: event.target.checked });

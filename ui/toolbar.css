@@ -699,3 +699,6 @@ svg {
 .ws-dot[data-color="pink"] { background: var(--ws-pink); }
 .ws-dot[data-color="teal"] { background: var(--ws-teal); }
 .ws-dot[data-color="gray"] { background: var(--ws-gray); }
+
+/* Tabs down the side: the row across the top goes, and the tab list takes over. */
+:root[data-vertical-tabs] .tab-row { display: none; }

@@ -139,6 +139,7 @@ Built in [milestone-6.md](milestone-6.md). What's left:
 3. **History and bookmarks are shared.** Decide whether a workspace should have its own.
 4. Memory cost of many workspaces open at once, and the untested cases listed in the milestone.
 5. Icons for Windows (`.ico`) and Linux.
+6. **Vertical tabs:** groups, search, pinned tabs, resizing by dragging, keyboard navigation, and a real-mouse test of drag reordering. See the milestone.
 
 ## How to test on macOS
 

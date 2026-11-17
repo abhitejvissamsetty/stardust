@@ -551,6 +551,12 @@ window.onBrowserEvent = (event) => {
     if (menuState.owner === "extensions") {
       openExtensionsMenu();
     }
+  } else if (event.type === "layout") {
+    tabLayout = { vertical: event.vertical, collapsed: event.collapsed };
+    document.documentElement.toggleAttribute("data-vertical-tabs", event.vertical);
+    if (menuState.owner === "menu") {
+      openAppMenu();
+    }
   } else if (event.type === "workspaces") {
     workspacesState = { items: event.items, current: event.current };
     renderWorkspace();
@@ -730,6 +736,7 @@ const MENU_WIDTH = 300;
 
 let extensionsState = { items: [], available: true };
 let workspacesState = { items: [], current: "" };
+let tabLayout = { vertical: false, collapsed: false };
 
 function toggleMenu(owner, open) {
   if (menuState.owner === owner) {
@@ -770,6 +777,7 @@ function openAppMenu() {
     { label: "Downloads", shortcut: shortcut("J"), command: page("downloads") },
     { label: "Bookmarks", shortcut: shortcut("O", { shift: true }), command: page("bookmarks") },
     { label: "Extensions", command: page("extensions") },
+    { label: tabLayout.vertical ? "Show tabs across the top" : "Show tabs down the side", command: { type: "setVerticalTabs", enabled: !tabLayout.vertical } },
     { kind: "separator" },
     { kind: "zoom", percent: activeTab()?.zoomPercent || 100 },
     { kind: "separator" },

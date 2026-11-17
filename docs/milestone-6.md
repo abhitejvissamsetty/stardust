@@ -1,4 +1,4 @@
-# Milestone 6: workspaces and the new icon
+# Milestone 6: workspaces, vertical tabs and the new icon
 
 Built and tested on macOS (Apple Silicon) on 2026-11-17. This is the first piece of Phase 1 of [creator-roadmap.md](creator-roadmap.md). Tested by driving the browser through Chromium's debugging protocol with real clicks, and by screenshots of Stardust's own pages. The native window frame wasn't looked at.
 
@@ -12,6 +12,7 @@ Built and tested on macOS (Apple Silicon) on 2026-11-17. This is the first piece
 | Saved logins kept apart per workspace | **Done** and tested |
 | Workspace button and switcher in the toolbar | **Done**, checked by screenshot |
 | Settings → Workspaces (create, rename, colour, delete) | **Done**, tested |
+| Vertical tabs: a tab list down the left, collapsible to icons | **Done** and tested |
 | Icon for Windows and Linux | **Not done**, see below |
 
 ## The icon
@@ -49,6 +50,34 @@ Logins are kept per workspace, so two accounts on one site don't mix. A login sa
 - **CEF only accepts a profile folder that is a direct child of the data folder.** A folder one level deeper silently becomes a memory-only profile: cookies were separate but vanished on restart. Found by testing a restart. The folders are now `Workspace-w1` and so on, and only folders named exactly like that are ever deleted.
 - **A page made before the profile has started fails.** A workspace window waits for the profile's "initialized" signal before making its toolbar and tabs, with a 4-second fallback. Before this, opening a workspace crashed the browser every time.
 - Workspace ids are `w` and a number, never reused, so a deleted workspace's data can't return under a new one. They become folder names, so nothing else is accepted.
+
+## Vertical tabs
+
+Settings → "Show tabs down the side", or "Show tabs down the side" in the menu, moves the tabs from a row across the top to a list down the left. The setting applies to every window at once, switches live, and is remembered across restarts.
+
+- **The list:** a "New tab" button, a collapse button, the tab rows (page icon or spinner, title, sound and mute button, close button), and the current workspace's name once there is more than one. The selected tab has an accent bar. Unloaded tabs are dimmed. Middle click closes. Drag a row to reorder. Collapsed, it's 56 px wide and shows icons only; expanded, 264 px.
+- **The toolbar** loses its row of tabs and gets 40 px shorter.
+- **A private window** shows "Private" at the top of the list and keeps its dark theme.
+- **Tab commands** (select, close, move, new tab, mute) all go through the same code as the tab row.
+
+### How it works
+
+- Each window's pages now sit in a box of their own under the toolbar, and the tab list is a second small browser view in that box, loading its own page (`ui/sidebar.html`). It costs one more renderer process while vertical tabs are on, and none when they're off.
+- The browser trusts what its pages send, so the tab list gets **its own, smaller set of allowed commands** (`UiCommand::allowed_from_sidebar`, with a test), and can only ever show its own page. It opens no windows.
+- The list is built and removed live. Turning it off closes its browser properly, which needed `do_close` to let go of the view first, as the extension popup does. A layout change that runs inside a toolbar's own message is deferred, or that toolbar wouldn't take its new height.
+
+### Tested
+
+Page width equals the window minus the list (1016 + 264 = 1280, and 1224 with it collapsed). With real mouse events: selecting a row, New tab, closing a tab, collapsing. Moving a tab by command. Turning it on, off and on again from each window, and across a restart. Closing a window that has a list, and closing the last window, which quits cleanly. The list was checked by screenshot.
+
+### Not tested or not built
+
+- **Dragging a row** with a real mouse: the reorder code is written, but only the move command was driven.
+- **Groups, search and pinned tabs** in the list, which the roadmap also lists. Not built.
+- **A window that's hidden behind another** keeps a stale toolbar height until it's shown, because Chromium doesn't resize hidden pages. Seen in tests, and right once shown.
+- Resizing the list by dragging its edge. The width is one of two sizes.
+- Keyboard use of the list (it has roles, but Tab/arrow navigation isn't designed).
+- Windows and Linux.
 
 ## Tests
 
