@@ -6,8 +6,8 @@ use cef::*;
 use crate::{
     client::{
         SharedShell, ToolbarClient, adopt_menu_view, clear_window, extension_load_paths,
-        load_background_tabs, prepare_tabs, register_shell, schedule_discard_check, select_tab,
-        set_window, startup_windows, toolbar_height, try_close_all, window_activated,
+        load_background_tabs, make_private, prepare_tabs, register_shell, schedule_discard_check,
+        select_tab, set_window, startup_windows, toolbar_height, try_close_all, window_activated,
     },
     render::BridgeInstaller,
     ui::toolbar_url,
@@ -90,10 +90,10 @@ wrap_browser_process_handler! {
             for (index, session) in windows.into_iter().enumerate() {
                 // Requested addresses open as new tabs in the last window.
                 let is_last = index + 1 == window_count;
-                open_window(Some(session), if is_last { &requested } else { &[] });
+                open_window(Some(session), if is_last { &requested } else { &[] }, false);
             }
             if window_count == 0 {
-                open_window(None, &requested);
+                open_window(None, &requested, false);
             }
             schedule_discard_check();
             let update_url = CefString::from(
@@ -116,9 +116,12 @@ fn requested_urls(inputs: impl Iterator<Item = String>) -> Vec<String> {
 
 /// Opens a window. Restored tabs load when selected, starting with the first one shown.
 /// Requested addresses open as tabs that load straight away.
-pub fn open_window(session: Option<Session>, requested_urls: &[String]) {
+pub fn open_window(session: Option<Session>, requested_urls: &[String], private: bool) {
     let shell = SharedShell::default();
     register_shell(&shell);
+    if private {
+        make_private(&shell);
+    }
 
     let mut toolbar_client = ToolbarClient::new(shell.clone());
     let toolbar = browser_view_create(
@@ -152,13 +155,9 @@ wrap_browser_view_delegate! {
 
     impl BrowserViewDelegate {
         fn browser_runtime_style(&self) -> RuntimeStyle {
-            crate::runtime_style()
+            RuntimeStyle::ALLOY
         }
 
-        // Stardust's toolbar is its own page, not Chrome's.
-        fn chrome_toolbar_type(&self, _browser_view: Option<&mut BrowserView>) -> ChromeToolbarType {
-            ChromeToolbarType::NONE
-        }
 
         fn delegate_for_popup_browser_view(
             &self,
@@ -191,7 +190,7 @@ wrap_browser_view_delegate! {
 
     impl BrowserViewDelegate {
         fn browser_runtime_style(&self) -> RuntimeStyle {
-            crate::runtime_style()
+            RuntimeStyle::ALLOY
         }
     }
 }
@@ -265,7 +264,7 @@ wrap_window_delegate! {
         }
 
         fn window_runtime_style(&self) -> RuntimeStyle {
-            crate::runtime_style()
+            RuntimeStyle::ALLOY
         }
     }
 }

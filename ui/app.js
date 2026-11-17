@@ -36,6 +36,16 @@ function tabLabel(tab) {
   return isBlank ? "New tab" : hasTitle ? tab.title : tab.url;
 }
 
+const GLOBE_ICON =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5" /><path d="M3.5 12h17M12 3.5c2.5 2.4 3.5 5.2 3.5 8.5s-1 6.1-3.5 8.5c-2.5-2.4-3.5-5.2-3.5-8.5s1-6.1 3.5-8.5z" /></svg>';
+const SPEAKER_ICON =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z" /><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11" /></svg>';
+const MUTED_ICON =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z" /><path d="M16 9.5l5 5M21 9.5l-5 5" /></svg>';
+
+// Page icons arrive once each, as pictures the browser has already fetched.
+const favicons = new Map();
+
 function createTabElement(id) {
   const element = document.createElement("div");
   element.className = "tab";
@@ -43,8 +53,21 @@ function createTabElement(id) {
   element.setAttribute("role", "tab");
   element.tabIndex = 0;
 
+  const icon = document.createElement("span");
+  icon.className = "tab-icon";
   const spinner = document.createElement("span");
   spinner.className = "tab-spinner";
+  const picture = document.createElement("img");
+  picture.className = "tab-favicon";
+  picture.alt = "";
+  const fallback = document.createElement("span");
+  fallback.className = "tab-fallback";
+  fallback.innerHTML = GLOBE_ICON;
+  icon.append(spinner, picture, fallback);
+  const audio = document.createElement("button");
+  audio.className = "icon-button tab-audio";
+  audio.tabIndex = -1;
+  audio.hidden = true;
   const title = document.createElement("span");
   title.className = "tab-title";
   const close = document.createElement("button");
@@ -53,8 +76,13 @@ function createTabElement(id) {
   close.setAttribute("aria-label", "Close tab");
   close.tabIndex = -1;
   close.innerHTML = CLOSE_ICON;
-  element.append(spinner, title, close);
+  element.append(icon, title, audio, close);
 
+  audio.addEventListener("pointerdown", (event) => event.stopPropagation());
+  audio.addEventListener("click", (event) => {
+    event.stopPropagation();
+    send({ type: "toggleMuteTab", id });
+  });
   close.addEventListener("pointerdown", (event) => event.stopPropagation());
   close.addEventListener("click", (event) => {
     event.stopPropagation();
@@ -160,7 +188,21 @@ function renderTabs() {
     element.querySelector(".tab-title").textContent = tabLabel(tab);
     element.title = tabLabel(tab);
     element.setAttribute("aria-selected", String(tab.id === strip.activeId));
+    element.classList.toggle("discarded", Boolean(tab.discarded));
+    // The spinner takes the icon's place while loading.
+    const picture = element.querySelector(".tab-favicon");
+    const data = tab.favicon ? favicons.get(tab.favicon) : null;
     element.querySelector(".tab-spinner").hidden = !tab.isLoading;
+    picture.hidden = tab.isLoading || !data;
+    if (data && picture.getAttribute("src") !== data) {
+      picture.src = data;
+    }
+    element.querySelector(".tab-fallback").hidden = tab.isLoading || Boolean(data);
+    const audio = element.querySelector(".tab-audio");
+    audio.hidden = !tab.audible && !tab.muted;
+    audio.innerHTML = tab.muted ? MUTED_ICON : SPEAKER_ICON;
+    audio.title = tab.muted ? "Unmute tab" : "Mute tab";
+    audio.setAttribute("aria-label", audio.title);
     tabsElement.append(element);
   }
   for (const element of existing.values()) {
@@ -191,7 +233,14 @@ function render() {
   byId("reload-icon").toggleAttribute("hidden", tab.isLoading);
   byId("stop-icon").toggleAttribute("hidden", !tab.isLoading);
 
-  byId("lock-icon").toggleAttribute("hidden", !tab.url.startsWith("https://"));
+  renderSiteInfo(tab);
+  const zoom = tab.zoomPercent || 100;
+  const chip = byId("zoom-chip");
+  chip.hidden = zoom === 100;
+  chip.textContent = `${zoom}%`;
+  if (menuState.owner === "menu" && menuState.zoom !== zoom) {
+    openAppMenu();
+  }
   byId("fill-login").hidden = !tab.hasLogins;
   const star = byId("star");
   star.disabled = !/^https?:\/\//.test(tab.url);
@@ -380,7 +429,7 @@ function renderBookmarksBar(bookmarks, folders) {
       if (folder.items.length > 0) {
         event.stopPropagation();
         showPopupUnder(event.currentTarget, folder.items, -1, 320);
-        folderMenuOpen = true;
+        menuState.owner = "folder";
       }
     }, "bookmark folder"));
   const bookmarkButtons = bookmarks.map((item) =>
@@ -389,11 +438,30 @@ function renderBookmarksBar(bookmarks, folders) {
   bar.hidden = folderButtons.length + bookmarkButtons.length === 0;
 }
 
-let folderMenuOpen = false;
-document.addEventListener("click", () => {
-  if (folderMenuOpen) {
-    folderMenuOpen = false;
+// Which menu under the toolbar is showing, if any: "folder", "menu" or "extensions".
+let menuState = { owner: null, zoom: 100 };
+
+function hideMenu() {
+  if (menuState.owner) {
+    menuState.owner = null;
     send({ type: "hidePopup" });
+    byId("menu-button").setAttribute("aria-expanded", "false");
+    byId("extensions-button").setAttribute("aria-expanded", "false");
+  }
+}
+
+// Anything clicked other than a menu's own button puts the menu away.
+document.addEventListener("pointerdown", (event) => {
+  if (!event.target.closest("#menu-button, #extensions-button, .ext-button")) {
+    hideMenu();
+    // An extension's popup goes away too, whether or not one is showing.
+    send({ type: "hideExtensionPopup" });
+  }
+}, true);
+window.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && menuState.owner) {
+    event.preventDefault();
+    hideMenu();
   }
 });
 
@@ -423,6 +491,7 @@ window.onBrowserEvent = (event) => {
     byId("dialog").hidden = true;
   } else if (event.type === "pageFocused") {
     hideSuggestions();
+    hideMenu();
     address.blur();
   } else if (event.type === "bookmarksBar") {
     renderBookmarksBar(event.bookmarks, event.folders);
@@ -456,6 +525,8 @@ window.onBrowserEvent = (event) => {
     const switched = event.strip.activeId !== strip.activeId;
     strip = event.strip;
     windowId = event.windowId;
+    document.documentElement.toggleAttribute("data-private", Boolean(event.private));
+    byId("private-badge").hidden = !event.private;
     if (switched) {
       hideSuggestions();
       if (document.activeElement === address) {
@@ -468,6 +539,15 @@ window.onBrowserEvent = (event) => {
     address.select();
   } else if (event.type === "keepAddressFocus") {
     address.focus();
+  } else if (event.type === "favicon") {
+    favicons.set(event.url, event.data);
+    renderTabs();
+  } else if (event.type === "extensions") {
+    extensionsState = { items: event.items, available: event.available };
+    renderPinned();
+    if (menuState.owner === "extensions") {
+      openExtensionsMenu();
+    }
   } else if (event.type === "windowState") {
     windowState = event;
     document.documentElement.toggleAttribute("data-fullscreen", event.fullscreen);
@@ -536,9 +616,9 @@ byId("close-anyway").addEventListener("click", () => {
   byId("close-warning").hidden = true;
   send({ type: "confirmClose", close: true });
 });
-for (const page of ["bookmarks", "history", "settings", "downloads"]) {
-  byId(`open-${page}`).addEventListener("click", () => send({ type: "openPage", page }));
-}
+byId("menu-button").addEventListener("click", () => toggleMenu("menu", openAppMenu));
+byId("extensions-button").addEventListener("click", () => toggleMenu("extensions", openExtensionsMenu));
+byId("zoom-chip").addEventListener("click", () => send({ type: "zoomReset" }));
 byId("clear-downloads").addEventListener("click", () => send({ type: "clearDownloads" }));
 byId("new-tab").addEventListener("click", () => send({ type: "newTab" }));
 back.addEventListener("click", () => send({ type: "back" }));
@@ -605,6 +685,150 @@ address.addEventListener("keydown", (event) => {
     }
   }
 });
+
+
+// -- Page security, shown beside the address ---------------------------------------------
+
+function renderSiteInfo(tab) {
+  const info = byId("site-info");
+  const secure = tab.url.startsWith("https://");
+  let host = "";
+  try {
+    host = new URL(tab.url).hostname;
+  } catch {
+    host = "";
+  }
+  // Plain HTTP to this computer is for developing sites, so it isn't a warning.
+  const local = host === "localhost" || host === "127.0.0.1" || host.endsWith(".localhost");
+  const insecure = tab.url.startsWith("http://") && !local;
+  info.hidden = !secure && !insecure;
+  info.classList.toggle("warning", insecure);
+  byId("lock-icon").toggleAttribute("hidden", !secure);
+  byId("warn-icon").toggleAttribute("hidden", !insecure);
+  byId("site-info-label").textContent = insecure ? "Not secure" : "";
+  info.title = secure ? "Connection is secure" : insecure ? "This page isn't encrypted, so others on the network could see it" : "";
+}
+
+// -- Menus -------------------------------------------------------------------------------
+
+const isMac = /Mac/.test(navigator.platform);
+const shortcut = (key, { shift = false, alt = false } = {}) =>
+  isMac ? `${alt ? "⌥" : ""}${shift ? "⇧" : ""}⌘${key}` : `Ctrl+${shift ? "Shift+" : ""}${alt ? "Alt+" : ""}${key}`;
+
+const ROW_HEIGHT = { item: 34, separator: 9, zoom: 40, extension: 40, note: 40, header: 30 };
+const MENU_WIDTH = 300;
+
+let extensionsState = { items: [], available: true };
+
+function toggleMenu(owner, open) {
+  if (menuState.owner === owner) {
+    hideMenu();
+    return;
+  }
+  hideSuggestions();
+  open();
+}
+
+function showMenu(owner, button, rows, width) {
+  // Only one thing hangs under the toolbar at a time.
+  send({ type: "hideExtensionPopup" });
+  const box = button.getBoundingClientRect();
+  const height = rows.reduce((sum, row) => sum + ROW_HEIGHT[row.kind || "item"], 0) + 12;
+  menuState = { owner, zoom: activeTab()?.zoomPercent || 100 };
+  byId("menu-button").setAttribute("aria-expanded", String(owner === "menu"));
+  byId("extensions-button").setAttribute("aria-expanded", String(owner === "extensions"));
+  send({
+    type: "showPopup",
+    left: Math.round(Math.max(8, box.right - width)),
+    top: Math.round(box.bottom) + 4,
+    width,
+    height,
+    contents: { type: "menu", rows, private: document.documentElement.hasAttribute("data-private") },
+  });
+}
+
+function openAppMenu() {
+  const page = (name) => ({ type: "openPage", page: name });
+  const rows = [
+    { label: "New tab", shortcut: shortcut("T"), command: { type: "newTab" } },
+    { label: "New window", shortcut: shortcut("N"), command: { type: "newWindow" } },
+    { label: "New private window", shortcut: shortcut("N", { shift: true }), command: { type: "newPrivateWindow" } },
+    { kind: "separator" },
+    { label: "History", shortcut: shortcut("H"), command: page("history") },
+    { label: "Downloads", shortcut: shortcut("J"), command: page("downloads") },
+    { label: "Bookmarks", shortcut: shortcut("O", { shift: true }), command: page("bookmarks") },
+    { label: "Extensions", command: page("extensions") },
+    { kind: "separator" },
+    { kind: "zoom", percent: activeTab()?.zoomPercent || 100 },
+    { kind: "separator" },
+    { label: "Print…", shortcut: shortcut("P"), command: { type: "print" } },
+    { label: "Find in page…", shortcut: shortcut("F"), command: { type: "openFind" } },
+    { label: "Reopen closed tab", shortcut: shortcut("T", { shift: true }), command: { type: "reopenClosedTab" } },
+    { label: "Developer tools", shortcut: isMac ? "⌥⌘I" : "F12", command: { type: "devTools" } },
+    { kind: "separator" },
+    { label: "Settings", shortcut: shortcut(","), command: page("settings") },
+    { label: "Quit Stardust", shortcut: shortcut("Q"), command: { type: "quit" } },
+  ];
+  showMenu("menu", byId("menu-button"), rows, MENU_WIDTH);
+}
+
+function openExtensionsMenu() {
+  const button = byId("extensions-button");
+  const box = button.getBoundingClientRect();
+  const rows = [{ kind: "header", label: "Extensions" }];
+  if (!extensionsState.available) {
+    rows.push({ kind: "note", label: "Extensions aren't used in private windows." });
+  } else if (extensionsState.items.length === 0) {
+    rows.push({ kind: "note", label: "No extensions yet." });
+  } else {
+    for (const item of extensionsState.items) {
+      // A popup opens under the button, with its right edge there.
+      rows.push({ kind: "extension", ...item, anchor: { left: Math.max(8, Math.round(box.right) - 380), top: Math.round(box.bottom) + 4 } });
+    }
+  }
+  rows.push({ kind: "separator" }, { label: "Manage extensions", command: { type: "openPage", page: "extensions" } });
+  showMenu("extensions", button, rows, MENU_WIDTH);
+}
+
+function renderPinned() {
+  const container = byId("pinned-extensions");
+  const buttons = extensionsState.items
+    .filter((item) => item.pinned)
+    .map((item) => {
+      const button = document.createElement("button");
+      button.className = "icon-button ext-button";
+      const label = item.title || item.name;
+      button.title = item.popupUrl ? label : `${label} (no popup: open Extensions to manage it)`;
+      button.setAttribute("aria-label", label);
+      if (item.iconData) {
+        const image = document.createElement("img");
+        image.alt = "";
+        image.src = item.iconData;
+        button.append(image);
+      } else {
+        let hue = 0;
+        for (const char of item.name) {
+          hue = (hue * 31 + char.codePointAt(0)) % 360;
+        }
+        const letter = document.createElement("span");
+        letter.className = "ext-letter";
+        letter.style.setProperty("--hue", String(hue));
+        letter.textContent = [...item.name.trim()][0]?.toUpperCase() ?? "?";
+        button.append(letter);
+      }
+      button.addEventListener("click", () => {
+        hideMenu();
+        if (item.popupUrl) {
+          const box = button.getBoundingClientRect();
+          send({ type: "openExtensionPopup", id: item.id, left: Math.max(8, Math.round(box.right) - 380), top: Math.round(box.bottom) + 4 });
+        } else {
+          send({ type: "openPage", page: "extensions" });
+        }
+      });
+      return button;
+    });
+  container.replaceChildren(...buttons);
+}
 
 send({ type: "ready" });
 

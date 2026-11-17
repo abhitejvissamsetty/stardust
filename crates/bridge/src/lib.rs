@@ -15,6 +15,7 @@ mod shortcuts;
 pub mod storage_types;
 mod tabs;
 mod video;
+mod zoom;
 
 pub use address::resolve_input;
 pub use discard::{
@@ -34,3 +35,4 @@ pub use settings::{
 pub use shortcuts::{KeyPress, Shortcut, shortcut_for};
 pub use tabs::{Tab, TabId, TabStrip};
 pub use video::{VAAPI_FEATURES, add_features, has_vaapi_driver, vaapi_driver_folders};
+pub use zoom::{ZOOM_STEPS, level_for_percent, next_zoom_percent, percent_for_level};

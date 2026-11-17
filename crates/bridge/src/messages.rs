@@ -91,6 +91,36 @@ pub enum UiCommand {
     WindowAction {
         action: WindowAction,
     },
+    NewWindow,
+    NewPrivateWindow,
+    OpenFind,
+    Quit,
+    ReopenClosedTab,
+    ZoomIn,
+    ZoomOut,
+    ZoomReset,
+    Print,
+    DevTools,
+    ToggleMuteTab {
+        id: TabId,
+    },
+    /// Puts an extension's popup away, if one is showing.
+    HideExtensionPopup,
+    /// Shows an extension's popup with its corner at the given place.
+    OpenExtensionPopup {
+        id: String,
+        left: i32,
+        top: i32,
+    },
+    SetExtensionPinned {
+        id: String,
+        pinned: bool,
+    },
+    /// Turns an extension off for the next start.
+    SetExtensionEnabled {
+        id: String,
+        enabled: bool,
+    },
     /// Asks how the window is showing, which the toolbar learns through `WindowState`.
     GetWindowState,
 }
@@ -116,6 +146,19 @@ pub enum UiEvent<'a> {
     Tabs {
         strip: &'a TabStrip,
         window_id: u32,
+        /// A private window, which looks different and keeps nothing.
+        private: bool,
+    },
+    /// A page's icon, as a `data:` address, sent once for the toolbar to remember.
+    Favicon {
+        url: &'a str,
+        data: &'a str,
+    },
+    /// The extensions that are on, for the toolbar's extensions menu and pinned buttons.
+    Extensions {
+        items: &'a [serde_json::Value],
+        /// Private windows don't run extensions.
+        available: bool,
     },
     Downloads {
         items: &'a [Download],
@@ -172,6 +215,8 @@ pub struct BrowserState {
     pub is_bookmarked: bool,
     /// The page's site has saved logins, so the toolbar offers to fill one.
     pub has_logins: bool,
+    /// How far the page is zoomed. Nothing sent yet means 100.
+    pub zoom_percent: i32,
 }
 
 #[cfg(test)]
@@ -233,6 +278,7 @@ mod tests {
         let json = serde_json::to_string(&UiEvent::Tabs {
             strip: &strip,
             window_id: 1,
+            private: false,
         })
         .unwrap();
         assert!(json.contains(r#""type":"tabs""#));

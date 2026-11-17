@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
     <title>Menu</title>
     <style>
       /*TOKENS*/
@@ -30,6 +30,29 @@
       .title { flex: 0 1 auto; max-width: 60%; }
       .url { color: var(--text-muted); flex: 1; min-width: 0; }
       .mark { color: var(--accent); flex: none; }
+
+      /* The toolbar's menus: rows of a label and a shortcut, and a few special rows. */
+      body { box-shadow: var(--shadow); }
+      .menu .item { height: 34px; }
+      .menu .label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .menu .shortcut { color: var(--text-muted); flex: none; font-size: 12px; }
+      .sep { background: var(--divider); height: 1px; margin: 4px 8px; }
+      .header { color: var(--text-muted); font-size: 12px; font-weight: 600; height: 30px; line-height: 30px; padding: 0 var(--space-3); }
+      .note { color: var(--text-muted); height: 40px; line-height: 40px; padding: 0 var(--space-3); }
+      .zoom { align-items: center; display: flex; gap: var(--space-1); height: 40px; padding: 0 var(--space-1) 0 var(--space-3); }
+      .zoom .label { flex: 1; }
+      .zoom button, .pin {
+        align-items: center; background: transparent; border: 0; border-radius: 6px; color: var(--text);
+        display: flex; font: inherit; height: 28px; justify-content: center; min-width: 28px; padding: 0 6px;
+      }
+      .zoom button:hover, .pin:hover { background: var(--press); }
+      .zoom .percent { color: var(--text-muted); min-width: 52px; }
+      .zoom svg, .pin svg { fill: none; height: 16px; stroke: currentcolor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.75; width: 16px; }
+      .ext-row { height: 40px; }
+      .ext-row img, .ext-row .letter { border-radius: 5px; flex: none; height: 24px; width: 24px; }
+      .ext-row .letter { align-items: center; background: hsl(var(--hue, 215) 55% 45%); color: #fff; display: flex; font-size: 12px; font-weight: 600; justify-content: center; }
+      .pin[aria-pressed="true"] { color: var(--accent); }
+      .pin[aria-pressed="true"] svg { fill: currentcolor; }
     </style>
   </head>
   <body>

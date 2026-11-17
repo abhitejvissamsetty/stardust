@@ -6,13 +6,16 @@ use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use bridge::{
     Answer, DISCARD_CHECK_MS, DISCARD_IDLE_MS, DISCARD_LOADED_LIMIT, Decision, Download,
     DownloadList, DownloadState, ExtensionSource, InternalPage, KeyPress, LoadedTab, PageCommand,
     Permission, SavedWindows, SearchEngine, Session, SessionTab, Settings, Shortcut,
     SitePermissions, StartupMode, SubmittedLogin, TabHistory, TabId, TabStrip, UiCommand, UiEvent,
-    WindowAction, describe, error_page, is_risky_file, is_web_url, login_origin,
-    normalize_homepage, resolve_input, safe_file_name, shortcut_for, site_origin,
+    WindowAction, describe, error_page, is_risky_file, is_web_url, level_for_percent, login_origin,
+    next_zoom_percent, normalize_homepage, percent_for_level, resolve_input, safe_file_name,
+    shortcut_for, site_origin,
     storage_types::{FolderItems, SuggestionItem},
     tabs_to_discard, unique_path,
 };
@@ -130,7 +133,28 @@ pub struct Shell {
     keep_loaded: HashSet<TabId>,
     /// Tabs from the command line after the first, to load once the window exists.
     background_loads: Vec<TabId>,
+    /// A private window. Its pages use a profile that lives in memory, and nothing it
+    /// does is saved: no history, session, downloads list or passwords.
+    private: bool,
+    request_context: Option<RequestContext>,
+    /// Page icons already fetched for this window, by address, and those being fetched.
+    favicons: HashMap<String, String>,
+    favicons_loading: HashSet<String>,
+    /// Addresses and titles of tabs closed in this window, latest last.
+    closed_tabs: Vec<(String, String)>,
+    /// The extension popup showing under the toolbar, if any: whose it is, and what
+    /// holds it. Only one shows at a time.
+    ext_popup_id: Option<String>,
+    ext_popup_view: Option<BrowserView>,
+    ext_popup_overlay: Option<OverlayController>,
+    ext_popup_browser: Option<Browser>,
 }
+
+const EXTENSION_POPUP_WIDTH: i32 = 380;
+const EXTENSION_POPUP_HEIGHT: i32 = 520;
+
+const CLOSED_TAB_LIMIT: usize = 20;
+const FAVICON_LIMIT_BYTES: usize = 48 * 1024;
 
 /// What the dialog bar is asking, and how to answer.
 enum PendingDialog {
@@ -516,12 +540,20 @@ fn send_to_toolbar(toolbar: Option<&Browser>, event: &UiEvent) {
 }
 
 fn publish(shell: &SharedShell) {
-    let (toolbar, strip, window_id) = {
+    let (toolbar, strip, window_id, private) = {
         let shell = lock(shell);
+        let mut strip = shell.strip.clone();
+        // A tab with no browser yet, or one unloaded to save memory, shows dimmed.
+        for id in shell.unloaded.keys() {
+            if let Some(tab) = strip.get_mut(*id) {
+                tab.discarded = true;
+            }
+        }
         (
             shell.toolbar.clone().filter(|_| shell.toolbar_ready),
-            shell.strip.clone(),
+            strip,
             shell.window_id,
+            shell.private,
         )
     };
     send_to_toolbar(
@@ -529,9 +561,36 @@ fn publish(shell: &SharedShell) {
         &UiEvent::Tabs {
             strip: &strip,
             window_id,
+            private,
         },
     );
     save_session();
+}
+
+fn is_private(shell: &SharedShell) -> bool {
+    lock(shell).private
+}
+
+/// Makes a window private. Call before its tabs are created.
+pub fn make_private(shell: &SharedShell) {
+    // No cache path means a profile that lives in memory and goes with the window.
+    let settings = RequestContextSettings::default();
+    let context = request_context_create_context(Some(&settings), None);
+    let mut guard = lock(shell);
+    guard.private = true;
+    guard.request_context = context;
+}
+
+/// A title for the window's frame, which says when it's private.
+fn window_title(shell: &SharedShell, title: &str) -> String {
+    if !is_private(shell) {
+        return title.to_owned();
+    }
+    if title.is_empty() {
+        "Private window".to_owned()
+    } else {
+        format!("{title} \u{2014} Private")
+    }
 }
 
 /// Saves the open tabs whenever they change, so a crash loses as little as possible.
@@ -544,7 +603,8 @@ fn save_session() {
         .iter()
         .filter_map(|shell| {
             let shell = lock(shell);
-            (!shell.window_closing).then(|| Session::from_strip(&shell.strip))
+            // Private windows leave nothing behind, not even their tabs.
+            (!shell.window_closing && !shell.private).then(|| Session::from_strip(&shell.strip))
         })
         .collect();
     if windows.is_empty() {
@@ -1052,6 +1112,10 @@ fn refresh_login_keys() {
 /// A page reported a login being sent. Offers to save it, unless it's saved already
 /// or the person said never for this site.
 fn offer_to_save_login(shell: &SharedShell, tab: TabId, url: &str, json: &str) {
+    // Private windows don't offer to save passwords.
+    if is_private(shell) {
+        return;
+    }
     let (Some(origin), Some(login)) = (login_origin(url), SubmittedLogin::parse(json)) else {
         return;
     };
@@ -1330,6 +1394,14 @@ fn move_tab(source: &SharedShell, id: TabId, target: Option<SharedShell>) {
     if is_blank || (target.is_none() && tab_count <= 1) {
         return;
     }
+    // A tab can't cross between private and ordinary windows, which would put what a
+    // private window keeps in memory into one that saves it, or the other way round.
+    if target
+        .as_ref()
+        .is_some_and(|target| is_private(target) != is_private(source))
+    {
+        return;
+    }
     let saved = SessionTab {
         url: moved.page.url.clone(),
         title: moved.title.clone(),
@@ -1351,6 +1423,7 @@ fn move_tab(source: &SharedShell, id: TabId, target: Option<SharedShell>) {
                 active: 0,
             }),
             &[],
+            is_private(source),
         ),
     }
     close_tab(source, id);
@@ -1580,12 +1653,13 @@ pub fn create_tab(shell: &SharedShell, url: &str) -> TabId {
 
 fn create_view(shell: &SharedShell, id: TabId, url: &str) {
     let mut client = PageClient::new(shell.clone(), id);
+    let mut context = lock(shell).request_context.clone();
     let view = browser_view_create(
         Some(&mut client),
         Some(&CefString::from(url)),
         Some(&BrowserSettings::default()),
         None,
-        None,
+        context.as_mut(),
         Some(&mut PageViewHost::new(shell.clone())),
     )
     .expect("Failed to create browser view");
@@ -1637,6 +1711,7 @@ pub fn set_window(shell: &SharedShell, window: Window, layout: Option<BoxLayout>
 
 /// Shows a tab, hides the others and moves focus to it.
 pub fn select_tab(shell: &SharedShell, id: TabId) {
+    hide_extension_popup(shell);
     let has_other_dialog = lock(shell)
         .dialog
         .as_ref()
@@ -1690,6 +1765,7 @@ pub fn select_tab(shell: &SharedShell, id: TabId) {
     }
     if let Some(window) = window {
         window.layout();
+        let title = window_title(shell, &title);
         window.set_title(Some(&CefString::from(title.as_str())));
     }
     if url.is_empty() || url == BLANK_PAGE {
@@ -1753,6 +1829,17 @@ fn remove_tab(shell: &SharedShell, id: TabId) {
         let mut shell = lock(shell);
         // Dropping these references is what lets the browser finish closing.
         let view = shell.handles.remove(&id).map(|handles| handles.view);
+        let closed = shell
+            .strip
+            .get(id)
+            .filter(|tab| is_web_url(&tab.page.url) && !shell.private)
+            .map(|tab| (tab.page.url.clone(), tab.title.clone()));
+        if let Some(closed) = closed {
+            shell.closed_tabs.push(closed);
+            if shell.closed_tabs.len() > CLOSED_TAB_LIMIT {
+                shell.closed_tabs.remove(0);
+            }
+        }
         shell.strip.remove(id);
         shell.last_shown.remove(&id);
         shell.audible.remove(&id);
@@ -1781,6 +1868,8 @@ fn run_command(shell: &SharedShell, command: UiCommand) {
             publish(shell);
             publish_downloads(shell);
             publish_bookmarks_bar();
+            publish_extensions(shell);
+            send_known_favicons(shell);
             // A new window's first tab was shown before its toolbar could take focus.
             let is_blank = lock(shell)
                 .strip
@@ -1833,7 +1922,10 @@ fn run_command(shell: &SharedShell, command: UiCommand) {
         } => {
             show_popup(shell, left, top, width, height, contents);
         }
-        UiCommand::HidePopup => hide_popup(shell),
+        UiCommand::HidePopup => {
+            hide_popup(shell);
+            hide_extension_popup(shell);
+        }
         UiCommand::PopupReady => {
             // The menu's browser takes focus when it starts, and the toolbar opened
             // it while someone was using the toolbar, so focus goes back there.
@@ -1878,6 +1970,31 @@ fn run_command(shell: &SharedShell, command: UiCommand) {
         UiCommand::FillLogin => fill_login(shell),
         UiCommand::WindowAction { action } => window_action(shell, action),
         UiCommand::GetWindowState => publish_window_state(shell),
+        UiCommand::NewWindow => open_window(None, &[BLANK_PAGE.to_owned()], is_private(shell)),
+        UiCommand::NewPrivateWindow => open_window(None, &[BLANK_PAGE.to_owned()], true),
+        UiCommand::OpenFind => open_find(shell),
+        UiCommand::Quit => close_all_browsers(),
+        UiCommand::ReopenClosedTab => reopen_closed_tab(shell),
+        UiCommand::ZoomIn => change_zoom(shell, Some(true)),
+        UiCommand::ZoomOut => change_zoom(shell, Some(false)),
+        UiCommand::ZoomReset => change_zoom(shell, None),
+        UiCommand::Print => print_page(shell),
+        UiCommand::DevTools => show_dev_tools(shell),
+        UiCommand::ToggleMuteTab { id } => toggle_mute(shell, id),
+        UiCommand::SetExtensionPinned { id, pinned } => {
+            extension_registry().set_pinned(&id, pinned);
+            save_extension_registry();
+            publish_extensions_everywhere();
+        }
+        UiCommand::SetExtensionEnabled { id, enabled } => {
+            extension_registry().set_enabled(&id, enabled);
+            save_extension_registry();
+            publish_extensions_everywhere();
+        }
+        UiCommand::OpenExtensionPopup { id, left, top } => {
+            open_extension_popup(shell, &id, left, top)
+        }
+        UiCommand::HideExtensionPopup => hide_extension_popup(shell),
         UiCommand::SelectTab { id } => select_tab(shell, id),
         UiCommand::CloseTab { id } => close_tab(shell, id),
         UiCommand::MoveTab { id, index } => {
@@ -2121,6 +2238,7 @@ fn run_page_command(shell: &SharedShell, frame: &Frame, command: PageCommand) {
                     Ok(entry) => {
                         extension_registry().add(entry);
                         save_extension_registry();
+                        publish_extensions_everywhere();
                     }
                     Err(error) => reply(
                         serde_json::json!({ "type": "extensionError", "message": error.to_string() }),
@@ -2132,11 +2250,13 @@ fn run_page_command(shell: &SharedShell, frame: &Frame, command: PageCommand) {
         PageCommand::SetExtensionEnabled { id, enabled } => {
             extension_registry().set_enabled(&id, enabled);
             save_extension_registry();
+            publish_extensions_everywhere();
             reply(extensions_event());
         }
         PageCommand::SetExtensionPinned { id, pinned } => {
             extension_registry().set_pinned(&id, pinned);
             save_extension_registry();
+            publish_extensions_everywhere();
             reply(extensions_event());
         }
         PageCommand::RemoveExtension { id } => {
@@ -2145,6 +2265,7 @@ fn run_page_command(shell: &SharedShell, frame: &Frame, command: PageCommand) {
                 extensions::delete_files(&entry, &folder);
             }
             save_extension_registry();
+            publish_extensions_everywhere();
             reply(extensions_event());
         }
         PageCommand::RestartBrowser => {
@@ -2294,7 +2415,14 @@ fn run_shortcut(shell: &SharedShell, event: &KeyEvent) -> bool {
         Shortcut::Bookmarks => open_page(shell, InternalPage::Bookmarks),
         Shortcut::Settings => open_page(shell, InternalPage::Settings),
         Shortcut::Quit => close_all_browsers(),
-        Shortcut::NewWindow => open_window(None, &[BLANK_PAGE.to_owned()]),
+        Shortcut::NewWindow => open_window(None, &[BLANK_PAGE.to_owned()], is_private(shell)),
+        Shortcut::NewPrivateWindow => open_window(None, &[BLANK_PAGE.to_owned()], true),
+        Shortcut::ReopenClosedTab => reopen_closed_tab(shell),
+        Shortcut::ZoomIn => change_zoom(shell, Some(true)),
+        Shortcut::ZoomOut => change_zoom(shell, Some(false)),
+        Shortcut::ZoomReset => change_zoom(shell, None),
+        Shortcut::Print => print_page(shell),
+        Shortcut::DevTools => show_dev_tools(shell),
         Shortcut::CloseTab => {
             if let Some(id) = strip.active_id() {
                 close_tab(shell, id);
@@ -2348,6 +2476,7 @@ pub fn try_close_all(shell: &SharedShell) -> bool {
             .filter_map(|handles| handles.browser.clone())
             .collect();
         let mut others: Vec<Browser> = shell.popup.clone().into_iter().collect();
+        others.extend(shell.ext_popup_browser.clone());
         others.extend(shell.toolbar.clone());
         (others, pages)
     };
@@ -2645,18 +2774,9 @@ wrap_browser_view_delegate! {
         // Every browser in a window must share a style, and Alloy draws no browser UI
         // of its own.
         fn browser_runtime_style(&self) -> RuntimeStyle {
-            crate::runtime_style()
+            RuntimeStyle::ALLOY
         }
 
-        // Chrome style can show Chrome's toolbar, with its extensions menu, above a tab.
-        // `STARDUST_TOOLBAR=chrome` shows it, to see what extensions would look like.
-        fn chrome_toolbar_type(&self, _browser_view: Option<&mut BrowserView>) -> ChromeToolbarType {
-            if std::env::var("STARDUST_TOOLBAR").is_ok_and(|toolbar| toolbar == "chrome") {
-                ChromeToolbarType::NORMAL
-            } else {
-                ChromeToolbarType::NONE
-            }
-        }
     }
 }
 
@@ -2842,6 +2962,7 @@ wrap_focus_handler! {
 
     impl FocusHandler {
         fn on_got_focus(&self, _browser: Option<&mut Browser>) {
+            hide_extension_popup(&self.shell);
             let toolbar = lock(&self.shell).toolbar.clone();
             send_to_toolbar(toolbar.as_ref(), &UiEvent::PageFocused);
         }
@@ -3001,7 +3122,7 @@ wrap_download_handler! {
                     total_bytes: item.total_bytes,
                     finished_ms: now_ms(),
                 });
-                if let Some(record) = record {
+                if let Some(record) = record.filter(|_| !is_private(&self.shell)) {
                     with_storage(|storage| storage.save_download(&record));
                 }
             }
@@ -3170,7 +3291,7 @@ wrap_display_handler! {
                 // Page loads are recorded when they finish, in case they fail. This is
                 // for sites that change their address without loading a new page.
                 let is_loading = shell.strip.get(self.id).is_some_and(|tab| tab.page.is_loading);
-                if !is_loading && is_web_url(&url) {
+                if !is_loading && is_web_url(&url) && !shell.private {
                     shell.with_storage(|storage| storage.record_visit(&url, "", now_ms()));
                 }
                 shell
@@ -3201,21 +3322,44 @@ wrap_display_handler! {
             });
         }
 
+        fn on_favicon_urlchange(&self, browser: Option<&mut Browser>, icon_urls: Option<&mut CefStringList>) {
+            let urls: Vec<String> = icon_urls
+                .map(std::mem::take)
+                .map(|list| list.into_iter().collect())
+                .unwrap_or_default();
+            // Only web addresses of a sensible length: a long `data:` address would be
+            // sent with every update.
+            let Some(url) = urls
+                .into_iter()
+                .find(|url| is_web_url(url) && url.len() <= 1024)
+            else {
+                return;
+            };
+            update_tab(&self.shell, self.id, |tab| tab.favicon = Some(url.clone()));
+            if let Some(host) = browser.and_then(|browser| browser.host()) {
+                request_favicon(&self.shell, &host, url);
+            }
+        }
+
         fn on_title_change(&self, _browser: Option<&mut Browser>, title: Option<&CefString>) {
             let (window, is_active) = {
                 let shell = lock(&self.shell);
                 (shell.window.clone(), shell.strip.active_id() == Some(self.id))
             };
-            if is_active && let Some(window) = window {
-                let is_blank = title.is_some_and(|title| title.to_string() == BLANK_PAGE);
-                let new_tab = CefString::from("New tab");
-                window.set_title(if is_blank { Some(&new_tab) } else { title });
-            }
             let title = title.map(CefString::to_string).unwrap_or_default();
+            if is_active && let Some(window) = window {
+                let shown = if title == BLANK_PAGE { "New tab" } else { &title };
+                let shown = window_title(&self.shell, shown);
+                window.set_title(Some(&CefString::from(shown.as_str())));
+            }
             {
                 let shell = lock(&self.shell);
                 let showing_error = shell.handles.get(&self.id).is_some_and(|handles| handles.showing_error);
-                if let Some(tab) = shell.strip.get(self.id).filter(|tab| !showing_error && is_web_url(&tab.page.url)) {
+                if let Some(tab) = shell
+                    .strip
+                    .get(self.id)
+                    .filter(|tab| !showing_error && !shell.private && is_web_url(&tab.page.url))
+                {
                     let url = tab.page.url.clone();
                     shell.with_storage(|storage| storage.set_history_title(&url, &title));
                 }
@@ -3387,6 +3531,7 @@ wrap_load_handler! {
             let Some(frame) = frame.filter(|frame| frame.is_main() != 0) else {
                 return;
             };
+            refresh_zoom(&self.shell, self.id);
             // A new tab's page takes focus when it finishes creating, so take it back.
             // The toolbar leaves the text alone if the address bar already has focus.
             let (is_blank_and_active, toolbar) = {
@@ -3415,7 +3560,7 @@ wrap_load_handler! {
                 let tab = shell
                     .strip
                     .get(self.id)
-                    .filter(|tab| http_status_code > 0 && is_web_url(&tab.page.url));
+                    .filter(|tab| http_status_code > 0 && is_web_url(&tab.page.url) && !shell.private);
                 if let Some(tab) = tab {
                     shell.with_storage(|storage| storage.record_visit(&tab.page.url, &tab.title, now_ms()));
                 }
@@ -3442,14 +3587,17 @@ wrap_audio_handler! {
             _channels: i32,
         ) {
             lock(&self.shell).audible.insert(self.id);
+            update_tab(&self.shell, self.id, |tab| tab.audible = true);
         }
 
         fn on_audio_stream_stopped(&self, _browser: Option<&mut Browser>) {
             lock(&self.shell).audible.remove(&self.id);
+            update_tab(&self.shell, self.id, |tab| tab.audible = false);
         }
 
         fn on_audio_stream_error(&self, _browser: Option<&mut Browser>, _message: Option<&CefString>) {
             lock(&self.shell).audible.remove(&self.id);
+            update_tab(&self.shell, self.id, |tab| tab.audible = false);
         }
     }
 }
@@ -3614,4 +3762,479 @@ pub fn load_background_tabs(shell: &SharedShell) {
         }
     }
     publish(shell);
+}
+
+// -- Things the toolbar and its menu ask for ---------------------------------------------
+
+/// Brings back the tab closed most recently in this window.
+fn reopen_closed_tab(shell: &SharedShell) {
+    let closed = lock(shell).closed_tabs.pop();
+    if let Some((url, _)) = closed {
+        let id = create_tab(shell, &url);
+        attach_tab(shell, id);
+    }
+}
+
+/// Zooms the page in or out one step, or back to 100% with `None`.
+fn change_zoom(shell: &SharedShell, zoom_in: Option<bool>) {
+    let Some(host) = active_browser(shell).and_then(|browser| browser.host()) else {
+        return;
+    };
+    let current = percent_for_level(host.zoom_level());
+    let target = zoom_in.map_or(100, |up| next_zoom_percent(current, up));
+    host.set_zoom_level(level_for_percent(target));
+    let id = lock(shell).strip.active_id();
+    if let Some(id) = id {
+        update_tab(shell, id, |tab| tab.page.zoom_percent = target);
+    }
+}
+
+/// Reads a tab's zoom, which CEF keeps for each site, into what the toolbar shows.
+fn refresh_zoom(shell: &SharedShell, id: TabId) {
+    let host = lock(shell)
+        .handles
+        .get(&id)
+        .and_then(|handles| handles.browser.clone())
+        .and_then(|browser| browser.host());
+    let Some(host) = host else {
+        return;
+    };
+    let percent = percent_for_level(host.zoom_level());
+    let changed = lock(shell)
+        .strip
+        .get(id)
+        .is_some_and(|tab| tab.page.zoom_percent != percent);
+    if changed {
+        update_tab(shell, id, |tab| tab.page.zoom_percent = percent);
+    }
+}
+
+fn print_page(shell: &SharedShell) {
+    if let Some(host) = active_browser(shell).and_then(|browser| browser.host()) {
+        host.print();
+    }
+}
+
+fn show_dev_tools(shell: &SharedShell) {
+    if let Some(host) = active_browser(shell).and_then(|browser| browser.host()) {
+        host.show_dev_tools(Some(&WindowInfo::default()), None, None, None);
+    }
+}
+
+fn toggle_mute(shell: &SharedShell, id: TabId) {
+    let host = lock(shell)
+        .handles
+        .get(&id)
+        .and_then(|handles| handles.browser.clone())
+        .and_then(|browser| browser.host());
+    let Some(host) = host else {
+        return;
+    };
+    let muted = host.is_audio_muted() == 0;
+    host.set_audio_muted(muted.into());
+    update_tab(shell, id, |tab| tab.muted = muted);
+}
+
+// -- Extension buttons -------------------------------------------------------------------
+
+/// The extensions that are on, for the toolbar's extensions menu and pinned buttons.
+fn extension_items() -> Vec<serde_json::Value> {
+    let Some(folder) = extensions_dir() else {
+        return Vec::new();
+    };
+    extension_registry()
+        .describe(&folder)
+        .into_iter()
+        .filter(|info| info.enabled)
+        .map(|info| {
+            serde_json::json!({
+                "id": info.id,
+                "name": info.summary.name,
+                "title": info.summary.action_title,
+                "iconData": info.icon_data,
+                "popupUrl": info.popup_url,
+                "pinned": info.pinned,
+            })
+        })
+        .collect()
+}
+
+fn publish_extensions(shell: &SharedShell) {
+    let (toolbar, private) = {
+        let shell = lock(shell);
+        (
+            shell.toolbar.clone().filter(|_| shell.toolbar_ready),
+            shell.private,
+        )
+    };
+    // Private windows don't run extensions, so they get none.
+    let items = if private {
+        Vec::new()
+    } else {
+        extension_items()
+    };
+    send_to_toolbar(
+        toolbar.as_ref(),
+        &UiEvent::Extensions {
+            items: &items,
+            available: !private,
+        },
+    );
+}
+
+fn publish_extensions_everywhere() {
+    for shell in open_windows() {
+        publish_extensions(&shell);
+    }
+}
+
+/// The address of an extension's popup, if that extension is on and has one. It's built
+/// from what the browser itself saved, never from what a page or the toolbar sent.
+fn extension_popup_url(id: &str) -> Option<String> {
+    let folder = extensions_dir()?;
+    extension_registry()
+        .describe(&folder)
+        .into_iter()
+        .find(|info| info.enabled && info.id == id)
+        .and_then(|info| info.popup_url)
+}
+
+/// Shows an extension's popup page under the toolbar, in a browser of its own. A second
+/// press on the same extension puts it away.
+fn open_extension_popup(shell: &SharedShell, id: &str, left: i32, top: i32) {
+    let (window, same, private) = {
+        let guard = lock(shell);
+        (
+            guard.window.clone(),
+            guard.ext_popup_id.as_deref() == Some(id),
+            guard.private,
+        )
+    };
+    hide_extension_popup(shell);
+    // Private windows don't run extensions.
+    let (Some(window), false, false) = (window, same, private) else {
+        return;
+    };
+    let Some(url) = extension_popup_url(id) else {
+        return;
+    };
+    // Marked as showing before its browser exists: the browser can start while it's being
+    // made, and its start-up looks for this to know it's still wanted.
+    lock(shell).ext_popup_id = Some(id.to_owned());
+    let mut client = ExtensionPopupClient::new(shell.clone(), id.to_owned());
+    let Some(view) = browser_view_create(
+        Some(&mut client),
+        Some(&CefString::from(url.as_str())),
+        Some(&BrowserSettings::default()),
+        None,
+        None,
+        Some(&mut ExtensionPopupViewHost::new()),
+    ) else {
+        release_extension_popup(shell);
+        return;
+    };
+    let Some(overlay) =
+        window.add_overlay_view(Some(&mut View::from(&view)), DockingMode::CUSTOM, 0)
+    else {
+        release_extension_popup(shell);
+        return;
+    };
+    overlay.set_bounds(Some(&Rect {
+        x: left,
+        y: top,
+        width: EXTENSION_POPUP_WIDTH,
+        height: EXTENSION_POPUP_HEIGHT,
+    }));
+    overlay.set_visible(1);
+    View::from(&view).request_focus();
+    let mut guard = lock(shell);
+    guard.ext_popup_view = Some(view);
+    guard.ext_popup_overlay = Some(overlay);
+}
+
+/// Puts the popup away. Its browser finishes closing once nothing holds its view.
+fn hide_extension_popup(shell: &SharedShell) {
+    let (overlay, browser) = {
+        let mut guard = lock(shell);
+        if guard.ext_popup_id.take().is_none() {
+            return;
+        }
+        (
+            guard.ext_popup_overlay.clone(),
+            guard.ext_popup_browser.clone(),
+        )
+    };
+    if let Some(overlay) = overlay {
+        overlay.set_visible(0);
+    }
+    match browser.and_then(|browser| browser.host()) {
+        Some(host) => {
+            host.close_browser(0);
+        }
+        // It hasn't finished starting, so there's nothing to close yet. Let go of it.
+        None => release_extension_popup(shell),
+    }
+}
+
+/// Lets go of what holds the popup, which lets its browser finish closing.
+fn release_extension_popup(shell: &SharedShell) {
+    let (overlay, view) = {
+        let mut guard = lock(shell);
+        guard.ext_popup_id = None;
+        guard.ext_popup_browser = None;
+        (guard.ext_popup_overlay.take(), guard.ext_popup_view.take())
+    };
+    if let Some(overlay) = overlay {
+        overlay.destroy();
+    }
+    drop(view);
+}
+
+wrap_browser_view_delegate! {
+    struct ExtensionPopupViewHost {}
+
+    impl ViewDelegate {}
+
+    impl BrowserViewDelegate {
+        fn browser_runtime_style(&self) -> RuntimeStyle {
+            RuntimeStyle::ALLOY
+        }
+
+    }
+}
+
+wrap_keyboard_handler! {
+    struct ExtensionPopupKeys {
+        shell: SharedShell,
+    }
+
+    impl KeyboardHandler {
+        #[cfg(not(target_os = "macos"))]
+        fn on_pre_key_event(
+            &self,
+            _browser: Option<&mut Browser>,
+            event: Option<&KeyEvent>,
+            _os_event: Option<&mut OsEvent>,
+            _is_keyboard_shortcut: Option<&mut i32>,
+        ) -> i32 {
+            popup_escape(&self.shell, event)
+        }
+
+        #[cfg(target_os = "macos")]
+        fn on_pre_key_event(
+            &self,
+            _browser: Option<&mut Browser>,
+            event: Option<&KeyEvent>,
+            _os_event: *mut u8,
+            _is_keyboard_shortcut: Option<&mut i32>,
+        ) -> i32 {
+            popup_escape(&self.shell, event)
+        }
+    }
+}
+
+/// Escape puts the popup away. Every other key stays with the popup's page.
+fn popup_escape(shell: &SharedShell, event: Option<&KeyEvent>) -> i32 {
+    const ESCAPE: i32 = 0x1B;
+    let is_escape = event.is_some_and(|event| {
+        event.type_ == KeyEventType::RAWKEYDOWN && event.windows_key_code == ESCAPE
+    });
+    if is_escape {
+        hide_extension_popup(shell);
+    }
+    is_escape.into()
+}
+
+wrap_request_handler! {
+    struct ExtensionPopupRequests {
+        id: String,
+    }
+
+    impl RequestHandler {
+        // A popup shows its own extension's pages and nothing else, so a link in it
+        // can't turn the popup into a window on the web.
+        fn on_before_browse(
+            &self,
+            _browser: Option<&mut Browser>,
+            _frame: Option<&mut Frame>,
+            request: Option<&mut Request>,
+            _user_gesture: i32,
+            _is_redirect: i32,
+        ) -> i32 {
+            let own = format!("chrome-extension://{}/", self.id);
+            let url = request.map(|request| CefString::from(&request.url()).to_string());
+            (!url.is_some_and(|url| url.starts_with(&own))).into()
+        }
+    }
+}
+
+wrap_client! {
+    struct ExtensionPopupClient {
+        shell: SharedShell,
+        id: String,
+    }
+
+    impl Client {
+        fn life_span_handler(&self) -> Option<LifeSpanHandler> {
+            Some(ExtensionPopupLifeSpan::new(self.shell.clone()))
+        }
+
+        fn keyboard_handler(&self) -> Option<KeyboardHandler> {
+            Some(ExtensionPopupKeys::new(self.shell.clone()))
+        }
+
+        fn request_handler(&self) -> Option<RequestHandler> {
+            Some(ExtensionPopupRequests::new(self.id.clone()))
+        }
+    }
+}
+
+wrap_life_span_handler! {
+    struct ExtensionPopupLifeSpan {
+        shell: SharedShell,
+    }
+
+    impl LifeSpanHandler {
+        fn on_after_created(&self, browser: Option<&mut Browser>) {
+            let wanted = {
+                let mut shell = lock(&self.shell);
+                shell.open_browsers += 1;
+                let wanted = shell.ext_popup_id.is_some();
+                if wanted {
+                    shell.ext_popup_browser = browser.as_deref().cloned();
+                }
+                wanted
+            };
+            // The person may have put the popup away before it finished starting. Closing
+            // is done without holding the lock, because it calls back into this code.
+            if !wanted && let Some(host) = browser.as_deref().and_then(|browser| browser.host()) {
+                host.close_browser(0);
+            }
+        }
+
+        // A popup can't open windows of its own.
+        fn on_before_popup(
+            &self,
+            _browser: Option<&mut Browser>,
+            _frame: Option<&mut Frame>,
+            _popup_id: i32,
+            _target_url: Option<&CefString>,
+            _target_frame_name: Option<&CefString>,
+            _target_disposition: WindowOpenDisposition,
+            _user_gesture: i32,
+            _popup_features: Option<&PopupFeatures>,
+            _window_info: Option<&mut WindowInfo>,
+            _client: Option<&mut Option<Client>>,
+            _settings: Option<&mut BrowserSettings>,
+            _extra_info: Option<&mut Option<DictionaryValue>>,
+            _no_javascript_access: Option<&mut i32>,
+        ) -> i32 {
+            1
+        }
+
+        // Like a tab, the popup's view lives in the window, which must stay open when it
+        // closes. Letting go of the view is what lets the browser finish.
+        fn do_close(&self, _browser: Option<&mut Browser>) -> i32 {
+            if lock(&self.shell).window_closing {
+                return 0;
+            }
+            release_extension_popup(&self.shell);
+            1
+        }
+
+        fn on_before_close(&self, _browser: Option<&mut Browser>) {
+            browser_closed(&self.shell, Some(TabId::MAX), None);
+        }
+    }
+}
+
+// -- Page icons --------------------------------------------------------------------------
+
+fn send_favicon(shell: &SharedShell, url: &str, data: &str) {
+    // One lock for both reads: locking again while this guard lives would never return.
+    let toolbar = {
+        let guard = lock(shell);
+        guard.toolbar.clone().filter(|_| guard.toolbar_ready)
+    };
+    send_to_toolbar(toolbar.as_ref(), &UiEvent::Favicon { url, data });
+}
+
+/// A toolbar that has just started needs the icons this window already has.
+fn send_known_favicons(shell: &SharedShell) {
+    let known: Vec<(String, String)> = lock(shell)
+        .favicons
+        .iter()
+        .map(|(url, data)| (url.clone(), data.clone()))
+        .collect();
+    for (url, data) in known {
+        send_favicon(shell, &url, &data);
+    }
+}
+
+/// Fetches a page's icon once, and sends it to the toolbar.
+fn request_favicon(shell: &SharedShell, host: &BrowserHost, url: String) {
+    let known = {
+        let mut guard = lock(shell);
+        if let Some(data) = guard.favicons.get(&url) {
+            Some(data.clone())
+        } else if guard.favicons_loading.len() >= 16 || !guard.favicons_loading.insert(url.clone())
+        {
+            return;
+        } else {
+            None
+        }
+    };
+    if let Some(data) = known {
+        send_favicon(shell, &url, &data);
+        return;
+    }
+    let mut callback = FaviconDownloaded::new(shell.clone(), url.clone());
+    host.download_image(
+        Some(&CefString::from(url.as_str())),
+        1,
+        32,
+        0,
+        Some(&mut callback),
+    );
+}
+
+wrap_download_image_callback! {
+    struct FaviconDownloaded {
+        shell: SharedShell,
+        url: String,
+    }
+
+    impl DownloadImageCallback {
+        fn on_download_image_finished(
+            &self,
+            _image_url: Option<&CefString>,
+            _http_status_code: i32,
+            image: Option<&mut Image>,
+        ) {
+            lock(&self.shell).favicons_loading.remove(&self.url);
+            // An image has a picture for each screen density it was fetched for, and none
+            // for the others, so ask for the ones a screen can have.
+            // An image has a picture for each screen density it was fetched for, and none
+            // for the others, so ask for the ones a screen can have. CEF returns nothing
+            // unless it's given somewhere to write the picture's size.
+            let png = image.and_then(|image| {
+                let (mut width, mut height) = (0, 0);
+                [2.0, 1.0, 3.0].into_iter().find_map(|scale| {
+                    image.as_png(scale, 1, Some(&mut width), Some(&mut height))
+                })
+            });
+            let Some(png) = png else {
+                return;
+            };
+            let mut bytes = vec![0u8; png.size()];
+            png.data(Some(&mut bytes), 0);
+            // A huge icon would be sent to the toolbar and kept for nothing.
+            if bytes.is_empty() || bytes.len() > FAVICON_LIMIT_BYTES {
+                return;
+            }
+            let data = format!("data:image/png;base64,{}", BASE64.encode(&bytes));
+            lock(&self.shell).favicons.insert(self.url.clone(), data.clone());
+            send_favicon(&self.shell, &self.url, &data);
+        }
+    }
 }

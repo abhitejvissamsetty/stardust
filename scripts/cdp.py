@@ -8,9 +8,10 @@ Start the browser with `--remote-debugging-port=9333`, then:
     python3 scripts/cdp.py type Toolbar 'example'
     python3 scripts/cdp.py shot Toolbar toolbar.png
 
-`eval` runs JavaScript in the page with that title and prints the result. `type`
+`eval` runs JavaScript in the page with that title and prints the result. With two
+windows open, `Toolbar@1` is the second toolbar. `type`
 sends real key presses to the page's focused element, which pages treat as a
-person typing. `shot` saves a PNG of the page, which is how Stardust's own
+person typing. `fullshot` is `shot` for the whole page, however far it scrolls. `shot` saves a PNG of the page, which is how Stardust's own
 interface (toolbar, tabs, menus, Settings) can be looked at without the screen. Pass `--port` before the command to use another port.
 
 Uses only the standard library, so it runs anywhere Python 3 does.
@@ -29,12 +30,17 @@ class Session:
     """A debugging connection to one page."""
 
     def __init__(self, port, title):
+        # "Toolbar@1" means the second page with that title, for when two windows have one.
+        index = 0
+        if "@" in title and title.rsplit("@", 1)[1].isdigit():
+            title, number = title.rsplit("@", 1)
+            index = int(number)
         targets = json.load(urllib.request.urlopen(f"http://127.0.0.1:{port}/json/list"))
         matches = [target for target in targets if target["title"] == title]
-        if not matches:
+        if len(matches) <= index:
             titles = ", ".join(repr(target["title"]) for target in targets)
-            sys.exit(f"No page titled {title!r}. Pages: {titles}")
-        path = matches[0]["webSocketDebuggerUrl"].split(str(port), 1)[1]
+            sys.exit(f"No page titled {title!r} number {index}. Pages: {titles}")
+        path = matches[index]["webSocketDebuggerUrl"].split(str(port), 1)[1]
         self.sock = socket.create_connection(("127.0.0.1", port))
         key = base64.b64encode(os.urandom(16)).decode()
         self.sock.send(
@@ -98,6 +104,16 @@ class Session:
         with open(path, "wb") as file:
             file.write(base64.b64decode(data))
 
+    def screenshot_full(self, path):
+        """Saves a PNG of the whole page, however far it scrolls."""
+        size = self.evaluate("JSON.stringify([document.documentElement.scrollWidth, document.documentElement.scrollHeight])")
+        width, height = json.loads(size)
+        params = {"format": "png", "captureBeyondViewport": True,
+                  "clip": {"x": 0, "y": 0, "width": width, "height": height, "scale": 1}}
+        data = self.call("Page.captureScreenshot", params)["data"]
+        with open(path, "wb") as file:
+            file.write(base64.b64decode(data))
+
     def type(self, text):
         """Sends key presses for each character."""
         for char in text:
@@ -116,6 +132,8 @@ def main(args):
         print(json.dumps(Session(port, args[1]).evaluate(args[2])))
     elif len(args) == 3 and args[0] == "shot":
         Session(port, args[1]).screenshot(args[2])
+    elif len(args) == 3 and args[0] == "fullshot":
+        Session(port, args[1]).screenshot_full(args[2])
     elif len(args) == 3 and args[0] == "type":
         Session(port, args[1]).type(args[2])
     else:

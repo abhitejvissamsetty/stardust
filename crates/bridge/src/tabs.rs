@@ -8,6 +8,14 @@ pub type TabId = u32;
 pub struct Tab {
     pub id: TabId,
     pub title: String,
+    /// The address of the page's icon. The toolbar gets the picture itself separately,
+    /// once, rather than with every update.
+    pub favicon: Option<String>,
+    /// Playing sound.
+    pub audible: bool,
+    pub muted: bool,
+    /// Not loaded, which saves memory, until it's selected.
+    pub discarded: bool,
     #[serde(flatten)]
     pub page: BrowserState,
     /// The tab's Back and Forward list, kept up to date for saving.

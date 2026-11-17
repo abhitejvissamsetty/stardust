@@ -74,6 +74,32 @@
   }
 }
 
+/* A private window is always dark, with a purple accent, so it can't be mistaken for
+   an ordinary one. */
+:root[data-private] {
+  color-scheme: dark;
+  --tab-row: #14121b;
+  --surface: #25222f;
+  --field: #181620;
+  --field-focus: #14121b;
+  --hover: rgb(255 255 255 / 8%);
+  --press: rgb(255 255 255 / 14%);
+  --divider: #38343f;
+  --text: #ece9f3;
+  --text-muted: #aaa5b6;
+  --text-disabled: #5d586b;
+  --accent: #b794f6;
+  --page: #14121b;
+  --danger: #ff8a80;
+  --on-accent: #1a1230;
+  --accent-soft: rgb(183 148 246 / 18%);
+  --warn-text: #ffd48a;
+  --warn-bg: #3a2d10;
+  --good-text: #8be0b0;
+  --good-bg: #123022;
+  --shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 4px 16px rgb(0 0 0 / 30%);
+}
+
 @media (prefers-reduced-motion: reduce) {
   :root {
     --motion-fast: 0ms;

@@ -16,47 +16,47 @@ body {
   user-select: none;
 }
 
-.toolbar {
-  align-items: center;
-  background: var(--surface);
-  border-bottom: 1px solid var(--divider);
-  display: flex;
-  gap: var(--space-1);
-  height: var(--size-toolbar);
-  padding: 0 var(--space-3) 0 var(--space-2);
-  position: relative;
-}
-
 .tab-row {
-  align-items: center;
+  align-items: flex-end;
   background: var(--tab-row);
   display: flex;
   gap: var(--space-1);
   height: var(--size-tab-row);
-  padding: 0 var(--space-2);
+  padding: 6px var(--space-2) 0;
 }
 
+.tab-row-space {
+  flex: 1;
+}
+
+/* The room at each side is for the selected tab's curved feet. */
 .tabs {
+  align-items: flex-end;
+  align-self: stretch;
   display: flex;
   flex: 0 1 auto;
   gap: 2px;
+  margin: 0 -10px;
   min-width: 0;
   overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0 10px;
   scrollbar-width: none;
 }
 
 .tab {
   align-items: center;
-  border-radius: var(--radius-sm);
+  border-radius: 9px 9px 0 0;
   color: var(--text-muted);
   display: flex;
   flex: 0 1 auto;
-  width: var(--size-tab);
   gap: var(--space-2);
-  height: var(--size-control);
+  height: 34px;
   min-width: var(--size-tab-min);
   padding: 0 var(--space-1) 0 var(--space-3);
+  position: relative;
   transition: background-color var(--motion-fast) var(--motion-ease);
+  width: var(--size-tab);
 }
 
 .tab:hover {
@@ -68,6 +68,27 @@ body {
   color: var(--text);
 }
 
+/* The curves where the selected tab meets the toolbar below it. */
+.tab[aria-selected="true"]::before,
+.tab[aria-selected="true"]::after {
+  bottom: 0;
+  content: "";
+  height: 9px;
+  pointer-events: none;
+  position: absolute;
+  width: 9px;
+}
+
+.tab[aria-selected="true"]::before {
+  background: radial-gradient(circle at 0 0, transparent 9px, var(--surface) 9.5px);
+  left: -9px;
+}
+
+.tab[aria-selected="true"]::after {
+  background: radial-gradient(circle at 100% 0, transparent 9px, var(--surface) 9.5px);
+  right: -9px;
+}
+
 .tab:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
@@ -75,6 +96,34 @@ body {
 
 .tab.dragging {
   opacity: 0.8;
+}
+
+.tab.discarded .tab-icon,
+.tab.discarded .tab-title {
+  opacity: 0.55;
+}
+
+.tab-icon {
+  align-items: center;
+  display: flex;
+  flex: none;
+  height: 16px;
+  justify-content: center;
+  width: 16px;
+}
+
+.tab-favicon {
+  border-radius: 3px;
+  height: 16px;
+  object-fit: contain;
+  width: 16px;
+}
+
+.tab-icon svg {
+  color: var(--text-muted);
+  height: 16px;
+  stroke-width: 1.5;
+  width: 16px;
 }
 
 .tab-title {
@@ -92,8 +141,8 @@ body {
   border-radius: 50%;
   border-top-color: var(--accent);
   flex: none;
-  height: 12px;
-  width: 12px;
+  height: 14px;
+  width: 14px;
 }
 
 @keyframes spin {
@@ -108,20 +157,100 @@ body {
   }
 }
 
-.tab-close {
+.tab-audio {
+  color: var(--accent);
   height: 20px;
   width: 20px;
 }
 
+.tab-audio svg,
 .tab-close svg {
-  height: 12px;
-  width: 12px;
+  height: 13px;
+  width: 13px;
+}
+
+.tab-close {
+  height: 20px;
+  opacity: 0;
+  width: 20px;
+}
+
+.tab:hover .tab-close,
+.tab:focus-within .tab-close,
+.tab[aria-selected="true"] .tab-close {
+  opacity: 1;
 }
 
 .icon-button#new-tab {
+  align-self: center;
   flex: none;
   height: 28px;
+  margin-bottom: 2px;
   width: 28px;
+}
+
+.private-badge {
+  align-items: center;
+  align-self: center;
+  background: var(--accent-soft);
+  border-radius: var(--radius-full);
+  color: var(--accent);
+  display: flex;
+  font-size: 12px;
+  font-weight: 600;
+  gap: 6px;
+  height: 26px;
+  margin-bottom: 2px;
+  padding: 0 10px;
+}
+
+.private-badge svg {
+  height: 15px;
+  width: 15px;
+}
+
+.toolbar {
+  align-items: center;
+  background: var(--surface);
+  border-bottom: 1px solid var(--divider);
+  display: flex;
+  gap: var(--space-1);
+  height: var(--size-toolbar);
+  padding: 0 var(--space-2);
+  position: relative;
+}
+
+.toolbar-end {
+  align-items: center;
+  display: flex;
+  flex: none;
+  gap: 2px;
+}
+
+.pinned {
+  align-items: center;
+  display: flex;
+  gap: 2px;
+}
+
+.ext-button img {
+  border-radius: 4px;
+  height: 18px;
+  object-fit: contain;
+  width: 18px;
+}
+
+.ext-letter {
+  align-items: center;
+  background: hsl(var(--hue, 215) 55% 45%);
+  border-radius: 5px;
+  color: #fff;
+  display: flex;
+  font-size: 11px;
+  font-weight: 600;
+  height: 20px;
+  justify-content: center;
+  width: 20px;
 }
 
 .icon-button {
@@ -143,7 +272,8 @@ body {
   background: var(--hover);
 }
 
-.icon-button:active:enabled {
+.icon-button:active:enabled,
+.icon-button[aria-expanded="true"] {
   background: var(--press);
 }
 
@@ -173,11 +303,11 @@ svg {
   border-radius: var(--radius-full);
   display: flex;
   flex: 1;
-  gap: var(--space-2);
-  height: var(--size-control);
-  margin: 0 var(--space-1);
+  gap: var(--space-1);
+  height: 34px;
+  margin: 0 var(--space-2);
   min-width: 0;
-  padding: 0 var(--space-3);
+  padding: 0 var(--space-1) 0 var(--space-2);
   transition: background-color var(--motion-fast) var(--motion-ease);
 }
 
@@ -185,8 +315,25 @@ svg {
   background: var(--field-focus);
 }
 
-.address svg {
+.site-info {
+  align-items: center;
+  border-radius: var(--radius-full);
   color: var(--text-muted);
+  display: flex;
+  flex: none;
+  font-size: 12px;
+  gap: 4px;
+  height: 24px;
+  padding: 0 var(--space-1);
+}
+
+.site-info.warning {
+  background: var(--warn-bg);
+  color: var(--warn-text);
+  padding: 0 8px 0 6px;
+}
+
+.site-info svg {
   flex: none;
   height: 14px;
   width: 14px;
@@ -201,20 +348,36 @@ svg {
   font-size: var(--text-sm);
   min-width: 0;
   outline: 0;
-  padding: 0;
+  padding: 0 var(--space-1);
 }
 
 .address input::placeholder {
   color: var(--text-muted);
 }
 
-.star {
-  height: 24px;
-  margin-right: -6px;
-  width: 24px;
+.zoom-chip {
+  background: var(--hover);
+  border: 0;
+  border-radius: var(--radius-full);
+  color: var(--text-muted);
+  flex: none;
+  font: inherit;
+  font-size: 12px;
+  height: 22px;
+  padding: 0 var(--space-2);
 }
 
-.address .star svg {
+.zoom-chip:hover {
+  background: var(--press);
+  color: var(--text);
+}
+
+.icon-button.small {
+  height: 26px;
+  width: 26px;
+}
+
+.address .icon-button svg {
   color: inherit;
   height: 16px;
   width: 16px;

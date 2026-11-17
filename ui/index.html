@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'"
+      content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'"
     />
     <title>Toolbar</title>
     <style>
@@ -18,6 +18,13 @@
       <button class="icon-button" id="new-tab" title="New tab" aria-label="New tab">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
       </button>
+      <div class="tab-row-space"></div>
+      <div class="private-badge" id="private-badge" title="Nothing you do in this window is saved" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M3 12h18M6 12l1.5-6h9L18 12" /><circle cx="8" cy="16.5" r="2.5" /><circle cx="16" cy="16.5" r="2.5" /><path d="M10.5 16.5h3" />
+        </svg>
+        <span>Private</span>
+      </div>
     </div>
     <nav class="toolbar" aria-label="Browser controls">
       <button class="icon-button" id="back" title="Back" aria-label="Back" disabled>
@@ -35,10 +42,16 @@
         </svg>
       </button>
       <form class="address" id="address-form" role="search">
-        <svg id="lock-icon" viewBox="0 0 24 24" aria-hidden="true" hidden>
-          <rect x="5" y="11" width="14" height="9" rx="2" />
-          <path d="M8 11V8a4 4 0 0 1 8 0v3" />
-        </svg>
+        <span class="site-info" id="site-info" hidden>
+          <svg id="lock-icon" viewBox="0 0 24 24" aria-hidden="true" hidden>
+            <rect x="5" y="11" width="14" height="9" rx="2" />
+            <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+          </svg>
+          <svg id="warn-icon" viewBox="0 0 24 24" aria-hidden="true" hidden>
+            <path d="M12 4l9 16H3z" /><path d="M12 10v4M12 17h.01" />
+          </svg>
+          <span id="site-info-label"></span>
+        </span>
         <input
           id="address"
           type="text"
@@ -48,30 +61,28 @@
           autocapitalize="off"
           spellcheck="false"
         />
-        <button class="icon-button" id="fill-login" type="button" title="Fill saved login" aria-label="Fill saved login" hidden>
+        <button class="zoom-chip" id="zoom-chip" type="button" title="Reset zoom" aria-label="Reset zoom" hidden></button>
+        <button class="icon-button small" id="fill-login" type="button" title="Fill saved login" aria-label="Fill saved login" hidden>
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <circle cx="8" cy="15" r="4" />
             <path d="M11 12l8-8M16 7l3 3M14 9l2 2" />
           </svg>
         </button>
-        <button class="icon-button star" id="star" type="button" title="Bookmark this page" aria-label="Bookmark this page" aria-pressed="false" disabled>
+        <button class="icon-button small star" id="star" type="button" title="Bookmark this page" aria-label="Bookmark this page" aria-pressed="false" disabled>
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M12 4l2.5 5.2 5.7.8-4.1 4 1 5.7L12 17l-5.1 2.7 1-5.7-4.1-4 5.7-.8z" />
           </svg>
         </button>
       </form>
-      <button class="icon-button" id="open-bookmarks" title="Bookmarks" aria-label="Bookmarks">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10a1 1 0 0 1 1 1v15l-6-4-6 4V5a1 1 0 0 1 1-1z" /></svg>
-      </button>
-      <button class="icon-button" id="open-history" title="History" aria-label="History">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" /><path d="M12 8v4l3 2" /></svg>
-      </button>
-      <button class="icon-button" id="open-downloads" title="Downloads" aria-label="Downloads">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 11l5 5 5-5M5 20h14" /></svg>
-      </button>
-      <button class="icon-button" id="open-settings" title="Settings" aria-label="Settings">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h2M10 17h10" /><circle cx="16" cy="7" r="2" /><circle cx="8" cy="17" r="2" /></svg>
-      </button>
+      <div class="toolbar-end">
+        <div class="pinned" id="pinned-extensions"></div>
+        <button class="icon-button" id="extensions-button" title="Extensions" aria-label="Extensions" aria-haspopup="menu">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 3h4v3a2 2 0 1 0 4 0h0v4h-3a2 2 0 1 0 0 4h3v4h-4a2 2 0 1 0-4 0H6v-4a2 2 0 1 0 0-4V7a4 4 0 0 1 4-4z" /></svg>
+        </button>
+        <button class="icon-button" id="menu-button" title="Stardust menu" aria-label="Stardust menu" aria-haspopup="menu">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="1.2" /><circle cx="12" cy="12" r="1.2" /><circle cx="12" cy="19" r="1.2" /></svg>
+        </button>
+      </div>
       <div class="progress" id="progress"></div>
     </nav>
     <section class="dialog" id="dialog" role="alertdialog" aria-labelledby="dialog-message" hidden>

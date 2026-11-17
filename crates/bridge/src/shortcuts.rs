@@ -20,6 +20,13 @@ pub enum Shortcut {
     MoveTabRight,
     Minimize,
     ToggleFullscreen,
+    NewPrivateWindow,
+    ReopenClosedTab,
+    ZoomIn,
+    ZoomOut,
+    ZoomReset,
+    Print,
+    DevTools,
     Find,
     FindNext,
     FindPrevious,
@@ -64,6 +71,14 @@ const W: i32 = 0x57;
 const F5: i32 = 0x74;
 const F6: i32 = 0x75;
 const F11: i32 = 0x7A;
+const F12: i32 = 0x7B;
+const I: i32 = 0x49;
+const P: i32 = 0x50;
+const KEY_0: i32 = 0x30;
+const PLUS: i32 = 0xBB;
+const MINUS: i32 = 0xBD;
+const NUMPAD_ADD: i32 = 0x6B;
+const NUMPAD_SUBTRACT: i32 = 0x6D;
 const M: i32 = 0x4D;
 const PAGE_UP: i32 = 0x21;
 const PAGE_DOWN: i32 = 0x22;
@@ -113,6 +128,17 @@ pub fn shortcut_for(key: KeyPress, is_mac: bool) -> Option<Shortcut> {
         }
         (KEY_9, true, false, false) => Some(Shortcut::LastTab),
         (F11, false, false, false) => Some(Shortcut::ToggleFullscreen),
+        (F12, false, false, false) => Some(Shortcut::DevTools),
+        // Chrome: Cmd+Option+I on macOS, Ctrl+Shift+I elsewhere.
+        (I, true, false, true) if is_mac => Some(Shortcut::DevTools),
+        (I, true, true, false) if !is_mac => Some(Shortcut::DevTools),
+        // Zoom: + may be typed with or without Shift.
+        (PLUS | NUMPAD_ADD, true, _, false) => Some(Shortcut::ZoomIn),
+        (MINUS | NUMPAD_SUBTRACT, true, false, false) => Some(Shortcut::ZoomOut),
+        (KEY_0, true, false, false) => Some(Shortcut::ZoomReset),
+        (P, true, false, false) => Some(Shortcut::Print),
+        (N, true, true, false) => Some(Shortcut::NewPrivateWindow),
+        (T, true, true, false) => Some(Shortcut::ReopenClosedTab),
         // Chrome on macOS: Cmd+M minimizes, and Ctrl+Cmd+F toggles full screen.
         (M, true, false, false) if is_mac => Some(Shortcut::Minimize),
         (PAGE_UP, true, true, false) => Some(Shortcut::MoveTabLeft),
@@ -130,6 +156,61 @@ mod tests {
             key_code,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn page_and_window_shortcuts_like_chrome() {
+        let cmd = |key_code, shift, alt| KeyPress {
+            command: true,
+            shift,
+            alt,
+            ..press(key_code)
+        };
+        let ctrl = |key_code, shift| KeyPress {
+            ctrl: true,
+            shift,
+            ..press(key_code)
+        };
+        assert_eq!(
+            shortcut_for(cmd(PLUS, false, false), true),
+            Some(Shortcut::ZoomIn)
+        );
+        assert_eq!(
+            shortcut_for(cmd(PLUS, true, false), true),
+            Some(Shortcut::ZoomIn)
+        );
+        assert_eq!(
+            shortcut_for(cmd(MINUS, false, false), true),
+            Some(Shortcut::ZoomOut)
+        );
+        assert_eq!(
+            shortcut_for(cmd(KEY_0, false, false), true),
+            Some(Shortcut::ZoomReset)
+        );
+        assert_eq!(
+            shortcut_for(cmd(P, false, false), true),
+            Some(Shortcut::Print)
+        );
+        assert_eq!(
+            shortcut_for(cmd(N, true, false), true),
+            Some(Shortcut::NewPrivateWindow)
+        );
+        assert_eq!(
+            shortcut_for(cmd(T, true, false), true),
+            Some(Shortcut::ReopenClosedTab)
+        );
+        assert_eq!(
+            shortcut_for(cmd(I, false, true), true),
+            Some(Shortcut::DevTools)
+        );
+        assert_eq!(shortcut_for(ctrl(I, true), false), Some(Shortcut::DevTools));
+        assert_eq!(shortcut_for(press(F12), false), Some(Shortcut::DevTools));
+        // Plain new window and new tab are unchanged.
+        assert_eq!(
+            shortcut_for(cmd(N, false, false), true),
+            Some(Shortcut::NewWindow)
+        );
+        assert_eq!(shortcut_for(ctrl(T, false), false), Some(Shortcut::NewTab));
     }
 
     #[test]
