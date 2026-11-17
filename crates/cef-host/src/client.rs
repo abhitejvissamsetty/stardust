@@ -10,9 +10,9 @@ use bridge::{
     Answer, DISCARD_CHECK_MS, DISCARD_IDLE_MS, DISCARD_LOADED_LIMIT, Decision, Download,
     DownloadList, DownloadState, InternalPage, KeyPress, LoadedTab, PageCommand, Permission,
     SavedWindows, SearchEngine, Session, SessionTab, Settings, Shortcut, SitePermissions,
-    StartupMode, SubmittedLogin, TabHistory, TabId, TabStrip, UiCommand, UiEvent, describe,
-    error_page, is_risky_file, is_web_url, login_origin, normalize_homepage, resolve_input,
-    safe_file_name, shortcut_for, site_origin,
+    StartupMode, SubmittedLogin, TabHistory, TabId, TabStrip, UiCommand, UiEvent, WindowAction,
+    describe, error_page, is_risky_file, is_web_url, login_origin, normalize_homepage,
+    resolve_input, safe_file_name, shortcut_for, site_origin,
     storage_types::{FolderItems, SuggestionItem},
     tabs_to_discard, unique_path,
 };
@@ -945,6 +945,48 @@ fn fill_login(shell: &SharedShell) {
     with_storage(|storage| storage.save_login(&origin, &login.username, now_ms()));
 }
 
+/// Tells the toolbar how its window is showing.
+fn publish_window_state(shell: &SharedShell) {
+    let (window, toolbar) = {
+        let shell = lock(shell);
+        (shell.window.clone(), shell.toolbar.clone())
+    };
+    let Some(window) = window else {
+        return;
+    };
+    send_to_toolbar(
+        toolbar.as_ref(),
+        &UiEvent::WindowState {
+            maximized: window.is_maximized() != 0,
+            minimized: window.is_minimized() != 0,
+            fullscreen: window.is_fullscreen() != 0,
+        },
+    );
+}
+
+/// What Chrome's title bar and window menu do.
+fn window_action(shell: &SharedShell, action: WindowAction) {
+    let Some(window) = lock(shell).window.clone() else {
+        return;
+    };
+    match action {
+        WindowAction::Minimize => window.minimize(),
+        WindowAction::ToggleMaximize => {
+            if window.is_fullscreen() != 0 {
+                window.set_fullscreen(0);
+            } else if window.is_maximized() != 0 {
+                window.restore();
+            } else {
+                window.maximize();
+            }
+        }
+        WindowAction::ToggleFullscreen => {
+            window.set_fullscreen((window.is_fullscreen() == 0).into())
+        }
+    }
+    publish_window_state(shell);
+}
+
 fn remember_permission(reply: Reply, site: &str, permissions: &[Permission]) {
     let decision = match reply {
         Reply::Accept => Decision::Allow,
@@ -1662,6 +1704,8 @@ fn run_command(shell: &SharedShell, command: UiCommand) {
         }
         UiCommand::OpenPage { page } => open_page(shell, page),
         UiCommand::FillLogin => fill_login(shell),
+        UiCommand::WindowAction { action } => window_action(shell, action),
+        UiCommand::GetWindowState => publish_window_state(shell),
         UiCommand::SelectTab { id } => select_tab(shell, id),
         UiCommand::CloseTab { id } => close_tab(shell, id),
         UiCommand::MoveTab { id, index } => {
@@ -2043,6 +2087,8 @@ fn run_shortcut(shell: &SharedShell, event: &KeyEvent) -> bool {
         Shortcut::PreviousTab => select(strip.neighbor(-1)),
         Shortcut::TabAt(index) => select(strip.at(index)),
         Shortcut::LastTab => select(strip.last()),
+        Shortcut::Minimize => window_action(shell, WindowAction::Minimize),
+        Shortcut::ToggleFullscreen => window_action(shell, WindowAction::ToggleFullscreen),
         Shortcut::MoveTabLeft | Shortcut::MoveTabRight => {
             let offset = if shortcut == Shortcut::MoveTabLeft {
                 -1

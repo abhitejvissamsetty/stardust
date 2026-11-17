@@ -397,6 +397,7 @@ document.addEventListener("click", () => {
   }
 });
 
+let windowState = { maximized: false, minimized: false, fullscreen: false };
 const matchCaseButton = byId("find-match-case");
 
 function runFind(forward, again) {
@@ -467,6 +468,9 @@ window.onBrowserEvent = (event) => {
     address.select();
   } else if (event.type === "keepAddressFocus") {
     address.focus();
+  } else if (event.type === "windowState") {
+    windowState = event;
+    document.documentElement.toggleAttribute("data-fullscreen", event.fullscreen);
   } else if (event.type === "menuReady") {
     openingMenu = false;
     focusBeforeMenu?.focus();

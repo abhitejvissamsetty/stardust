@@ -207,6 +207,25 @@ wrap_window_delegate! {
             clear_window(&self.shell);
         }
 
+        // CEF's own defaults are yes for all of these, but the Rust bindings default
+        // every one to no, which left the window unable to resize, maximize or
+        // minimize, and without macOS's close, minimize and zoom buttons.
+        fn can_resize(&self, _window: Option<&mut Window>) -> i32 {
+            1
+        }
+
+        fn can_maximize(&self, _window: Option<&mut Window>) -> i32 {
+            1
+        }
+
+        fn can_minimize(&self, _window: Option<&mut Window>) -> i32 {
+            1
+        }
+
+        fn with_standard_window_buttons(&self, _window: Option<&mut Window>) -> i32 {
+            1
+        }
+
         fn can_close(&self, _window: Option<&mut Window>) -> i32 {
             try_close_all(&self.shell).into()
         }

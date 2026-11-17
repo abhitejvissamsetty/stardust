@@ -18,6 +18,8 @@ pub enum Shortcut {
     /// Moves the active tab one place left or right.
     MoveTabLeft,
     MoveTabRight,
+    Minimize,
+    ToggleFullscreen,
     Find,
     FindNext,
     FindPrevious,
@@ -61,6 +63,8 @@ const R: i32 = 0x52;
 const W: i32 = 0x57;
 const F5: i32 = 0x74;
 const F6: i32 = 0x75;
+const F11: i32 = 0x7A;
+const M: i32 = 0x4D;
 const PAGE_UP: i32 = 0x21;
 const PAGE_DOWN: i32 = 0x22;
 const OPEN_BRACKET: i32 = 0xDB;
@@ -70,8 +74,13 @@ const CLOSE_BRACKET: i32 = 0xDD;
 pub fn shortcut_for(key: KeyPress, is_mac: bool) -> Option<Shortcut> {
     let primary = if is_mac { key.command } else { key.ctrl };
     let other = if is_mac { key.ctrl } else { key.command };
-    if other && key.key_code != TAB {
+    // Ctrl+Cmd+F is macOS's full screen shortcut, the one Ctrl combination that isn't Tab.
+    let is_mac_full_screen = is_mac && key.ctrl && key.command && key.key_code == F;
+    if other && key.key_code != TAB && !is_mac_full_screen {
         return None;
+    }
+    if is_mac_full_screen {
+        return Some(Shortcut::ToggleFullscreen);
     }
 
     match (key.key_code, primary, key.shift, key.alt) {
@@ -103,6 +112,9 @@ pub fn shortcut_for(key: KeyPress, is_mac: bool) -> Option<Shortcut> {
             Some(Shortcut::TabAt((key.key_code - KEY_1) as usize))
         }
         (KEY_9, true, false, false) => Some(Shortcut::LastTab),
+        (F11, false, false, false) => Some(Shortcut::ToggleFullscreen),
+        // Chrome on macOS: Cmd+M minimizes, and Ctrl+Cmd+F toggles full screen.
+        (M, true, false, false) if is_mac => Some(Shortcut::Minimize),
         (PAGE_UP, true, true, false) => Some(Shortcut::MoveTabLeft),
         (PAGE_DOWN, true, true, false) => Some(Shortcut::MoveTabRight),
         _ => None,
@@ -118,6 +130,33 @@ mod tests {
             key_code,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn window_shortcuts() {
+        let key = |key_code, command, ctrl| KeyPress {
+            command,
+            ctrl,
+            ..press(key_code)
+        };
+        assert_eq!(
+            shortcut_for(press(F11), false),
+            Some(Shortcut::ToggleFullscreen)
+        );
+        assert_eq!(
+            shortcut_for(key(M, true, false), true),
+            Some(Shortcut::Minimize)
+        );
+        assert_eq!(
+            shortcut_for(key(F, true, true), true),
+            Some(Shortcut::ToggleFullscreen)
+        );
+        // Plain Cmd+F is still find, and Ctrl+M means nothing on Windows or Linux.
+        assert_eq!(
+            shortcut_for(key(F, true, false), true),
+            Some(Shortcut::Find)
+        );
+        assert_eq!(shortcut_for(key(M, false, true), false), None);
     }
 
     #[test]

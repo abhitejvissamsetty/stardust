@@ -88,6 +88,21 @@ pub enum UiCommand {
     },
     /// Fills the page's most recently used saved login.
     FillLogin,
+    WindowAction {
+        action: WindowAction,
+    },
+    /// Asks how the window is showing, which the toolbar learns through `WindowState`.
+    GetWindowState,
+}
+
+/// What the person asked of the window, as Chrome's title bar and menus do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WindowAction {
+    Minimize,
+    /// Maximizes, or restores a window that already is.
+    ToggleMaximize,
+    ToggleFullscreen,
 }
 
 /// Sent to the toolbar page.
@@ -138,6 +153,11 @@ pub enum UiEvent<'a> {
     KeepAddressFocus,
     /// The menu has opened, and the toolbar has focus back.
     MenuReady,
+    WindowState {
+        maximized: bool,
+        minimized: bool,
+        fullscreen: bool,
+    },
 }
 
 /// Everything the toolbar shows about the current page.
