@@ -574,8 +574,10 @@ window.onBrowserEvent = (event) => {
       element.append(span, button);
       return element;
     };
+    // A login in another workspace says which, since it's a different account.
+    const where = (item) => (item.workspace ? ` [${item.workspace}]` : "");
     const logins = event.logins.map((login) =>
-      row(`${login.origin} — ${login.username || "(no username)"}`, "Remove", {
+      row(`${login.site}${where(login)} — ${login.username || "(no username)"}`, "Remove", {
         type: "deleteLogin",
         origin: login.origin,
         username: login.username,
@@ -583,8 +585,8 @@ window.onBrowserEvent = (event) => {
     );
     byId("logins").replaceChildren(...logins);
     byId("logins-hint").hidden = logins.length > 0;
-    const never = event.neverSave.map((origin) =>
-      row(`Never saved: ${origin}`, "Allow saving", { type: "forgetNeverSaveLogin", origin }),
+    const never = event.neverSave.map((item) =>
+      row(`Never saved: ${item.site}${where(item)}`, "Allow saving", { type: "forgetNeverSaveLogin", origin: item.origin }),
     );
     byId("never-save").replaceChildren(...never);
   } else if (event.type === "sitePermissions") {

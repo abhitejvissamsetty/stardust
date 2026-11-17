@@ -9,6 +9,7 @@ Built and tested on macOS (Apple Silicon) on 2026-11-17. This is the first piece
 | New app icon (macOS) | **Done.** Built into the app bundle by `cargo xtask bundle`. Not looked at in the Dock or Finder |
 | Workspaces: own cookies, logins and site storage | **Done** and tested, including after a hard kill and restart |
 | Workspaces: own open tabs, restored on switching | **Done** and tested |
+| Saved logins kept apart per workspace | **Done** and tested |
 | Workspace button and switcher in the toolbar | **Done**, checked by screenshot |
 | Settings → Workspaces (create, rename, colour, delete) | **Done**, tested |
 | Icon for Windows and Linux | **Not done**, see below |
@@ -34,11 +35,13 @@ A workspace is a named, coloured set of tabs with a profile of its own, on disk.
 | Separate per workspace | Shared by all |
 |---|---|
 | Cookies, and so who is signed in | History and bookmarks |
-| Local storage, IndexedDB, caches | Saved passwords (the key button fills the most recently used login for the site, from any workspace) |
-| Open tabs and their back/forward lists | Site permission answers, downloads, settings |
-| | Extensions, which **only run in Personal** |
+| Local storage, IndexedDB, caches | Site permission answers, downloads, settings |
+| Saved logins, and "never save" choices | Extensions, which **only run in Personal** |
+| Open tabs and their back/forward lists | |
 
-The shared saved passwords are a real limit for the main use case: two accounts on the same site share one list, so the key button can offer the wrong account's login. See [remaining-work.md](remaining-work.md).
+### Saved logins
+
+Logins are kept per workspace, so two accounts on one site don't mix. A login saved in Channel A is stored under the key `w1|<site>` (in Stardust's database and in the system password store); Personal keeps the plain site as before, so nothing already saved changed. The key button only appears for, and only fills, the current workspace's login. Settings → Passwords lists every login with its workspace's name in brackets, and Remove and Allow saving work on the right one. Tested: Personal saved `ann` and Channel A saved `bob` for the same site; Channel A showed no key until it had its own login, and each window filled only its own account.
 
 ### How it works, and two things learned
 

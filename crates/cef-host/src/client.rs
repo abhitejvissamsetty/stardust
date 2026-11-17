@@ -1293,11 +1293,65 @@ fn answer_dialog(shell: &SharedShell, reply: Reply, input: &str) {
     focus_active_tab(shell);
 }
 
-/// Whether a page's site has saved logins, for the toolbar's key button.
-fn has_saved_logins(url: &str) -> bool {
+/// The key a login is saved under. The main workspace uses the site's own origin, as
+/// logins always have. Another workspace puts its id in front, so its accounts stay
+/// apart from every other workspace's, even on the same site. `|` can't be in an origin.
+fn login_key(workspace: &str, origin: &str) -> String {
+    if workspace.is_empty() {
+        origin.to_owned()
+    } else {
+        format!("{workspace}|{origin}")
+    }
+}
+
+/// Splits a saved key back into its workspace and site.
+fn split_login_key(key: &str) -> (&str, &str) {
+    match key.split_once('|') {
+        Some((workspace, origin)) if bridge::is_workspace_id(workspace) => (workspace, origin),
+        _ => ("", key),
+    }
+}
+
+/// The saved logins and never-save sites, for Settings, each with its workspace's name.
+fn logins_event() -> serde_json::Value {
+    let describe = |key: &str| {
+        let (workspace, site) = split_login_key(key);
+        let name = if workspace.is_empty() {
+            String::new()
+        } else {
+            workspace_list().display(workspace).0
+        };
+        (site.to_owned(), name)
+    };
+    let logins: Vec<serde_json::Value> = with_storage(|storage| storage.logins(None))
+        .unwrap_or_default()
+        .iter()
+        .map(|login| {
+            let (site, workspace) = describe(&login.origin);
+            serde_json::json!({
+                "origin": login.origin,
+                "site": site,
+                "workspace": workspace,
+                "username": login.username,
+            })
+        })
+        .collect();
+    let never: Vec<serde_json::Value> = with_storage(Storage::never_save_login_sites)
+        .unwrap_or_default()
+        .iter()
+        .map(|key| {
+            let (site, workspace) = describe(key);
+            serde_json::json!({ "origin": key, "site": site, "workspace": workspace })
+        })
+        .collect();
+    serde_json::json!({ "type": "logins", "logins": logins, "neverSave": never })
+}
+
+/// Whether a page's site has saved logins in this workspace, for the toolbar's key button.
+fn has_saved_logins(workspace: &str, url: &str) -> bool {
     login_origin(url).is_some_and(|origin| {
-        with_storage(|storage| storage.logins(Some(&origin)))
-            .is_some_and(|logins| !logins.is_empty())
+        let key = login_key(workspace, &origin);
+        with_storage(|storage| storage.logins(Some(&key))).is_some_and(|logins| !logins.is_empty())
     })
 }
 
@@ -1307,10 +1361,11 @@ fn refresh_login_keys() {
         let changed = {
             let mut guard = lock(&shell);
             let mut changed = false;
+            let workspace = guard.workspace.clone();
             let ids: Vec<TabId> = guard.strip.tabs().iter().map(|tab| tab.id).collect();
             for id in ids {
                 if let Some(tab) = guard.strip.get_mut(id) {
-                    let has_logins = has_saved_logins(&tab.page.url);
+                    let has_logins = has_saved_logins(&workspace, &tab.page.url);
                     changed |= tab.page.has_logins != has_logins;
                     tab.page.has_logins = has_logins;
                 }
@@ -1330,9 +1385,11 @@ fn offer_to_save_login(shell: &SharedShell, tab: TabId, url: &str, json: &str) {
     if is_private(shell) {
         return;
     }
-    let (Some(origin), Some(login)) = (login_origin(url), SubmittedLogin::parse(json)) else {
+    let (Some(site), Some(login)) = (login_origin(url), SubmittedLogin::parse(json)) else {
         return;
     };
+    // Saved under this workspace's own key, so accounts don't mix between workspaces.
+    let origin = login_key(&workspace_of(shell), &site);
     if with_storage(|storage| storage.never_saves_logins(&origin)).unwrap_or(true) {
         return;
     }
@@ -1351,9 +1408,9 @@ fn offer_to_save_login(shell: &SharedShell, tab: TabId, url: &str, json: &str) {
     } else {
         format!("Save the password for {who}?")
     };
-    let host = origin
+    let host = site
         .split_once("://")
-        .map_or(origin.as_str(), |(_, host)| host)
+        .map_or(site.as_str(), |(_, host)| host)
         .to_owned();
     let pending = PendingDialog::SaveLogin {
         origin,
@@ -1371,15 +1428,17 @@ fn fill_login(shell: &SharedShell) {
     let Some(frame) = browser.main_frame() else {
         return;
     };
-    let Some(origin) = login_origin(&CefString::from(&frame.url()).to_string()) else {
+    let Some(site) = login_origin(&CefString::from(&frame.url()).to_string()) else {
         return;
     };
-    let Some(login) = with_storage(|storage| storage.logins(Some(&origin)))
+    // Only this workspace's logins, so another account on the site is never offered.
+    let key = login_key(&workspace_of(shell), &site);
+    let Some(login) = with_storage(|storage| storage.logins(Some(&key)))
         .and_then(|logins| logins.into_iter().next())
     else {
         return;
     };
-    let Some(password) = passwords::get(&origin, &login.username) else {
+    let Some(password) = passwords::get(&key, &login.username) else {
         return;
     };
     let Some(mut message) = process_message_create(Some(&CefString::from(FILL_LOGIN_MESSAGE)))
@@ -1387,12 +1446,12 @@ fn fill_login(shell: &SharedShell) {
         return;
     };
     if let Some(list) = message.argument_list() {
-        list.set_string(0, Some(&CefString::from(origin.as_str())));
+        list.set_string(0, Some(&CefString::from(site.as_str())));
         list.set_string(1, Some(&CefString::from(login.username.as_str())));
         list.set_string(2, Some(&CefString::from(password.as_str())));
     }
     frame.send_process_message(ProcessId::RENDERER, Some(&mut message));
-    with_storage(|storage| storage.save_login(&origin, &login.username, now_ms()));
+    with_storage(|storage| storage.save_login(&key, &login.username, now_ms()));
 }
 
 /// Tells the toolbar how its window is showing.
@@ -2541,23 +2600,17 @@ fn run_page_command(shell: &SharedShell, frame: &Frame, command: PageCommand) {
             close_all_browsers();
         }
         PageCommand::ListLogins => {
-            let logins = with_storage(|storage| storage.logins(None)).unwrap_or_default();
-            let never = with_storage(Storage::never_save_login_sites).unwrap_or_default();
-            reply(serde_json::json!({ "type": "logins", "logins": logins, "neverSave": never }));
+            reply(logins_event());
         }
         PageCommand::DeleteLogin { origin, username } => {
             passwords::delete(&origin, &username);
             with_storage(|storage| storage.delete_login(&origin, &username));
             refresh_login_keys();
-            let logins = with_storage(|storage| storage.logins(None)).unwrap_or_default();
-            let never = with_storage(Storage::never_save_login_sites).unwrap_or_default();
-            reply(serde_json::json!({ "type": "logins", "logins": logins, "neverSave": never }));
+            reply(logins_event());
         }
         PageCommand::ForgetNeverSaveLogin { origin } => {
             with_storage(|storage| storage.set_never_save_login(&origin, false));
-            let logins = with_storage(|storage| storage.logins(None)).unwrap_or_default();
-            let never = with_storage(Storage::never_save_login_sites).unwrap_or_default();
-            reply(serde_json::json!({ "type": "logins", "logins": logins, "neverSave": never }));
+            reply(logins_event());
         }
         PageCommand::ListSitePermissions => {
             let sites = site_permissions().sites().clone();
@@ -3581,7 +3634,7 @@ wrap_display_handler! {
                     Some(history.clone())
                 })
             };
-            let has_logins = has_saved_logins(&url);
+            let has_logins = has_saved_logins(&workspace_of(&self.shell), &url);
             update_tab(&self.shell, self.id, |tab| {
                 tab.page.url = url;
                 tab.page.is_bookmarked = is_bookmarked;
