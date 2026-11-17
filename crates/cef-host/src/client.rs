@@ -11,12 +11,12 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use bridge::{
     Answer, DISCARD_CHECK_MS, DISCARD_IDLE_MS, DISCARD_LOADED_LIMIT, Decision, Download,
-    DownloadList, DownloadState, ExtensionSource, InternalPage, KeyPress, LoadedTab, PageCommand,
-    Permission, SavedWindows, SearchEngine, Session, SessionTab, Settings, Shortcut, SidePanelData,
-    SitePermissions, StartupMode, SubmittedLogin, TabHistory, TabId, TabStrip, UiCommand, UiEvent,
-    WindowAction, Workspaces, describe, error_page, is_risky_file, is_web_url, level_for_percent,
-    login_origin, next_zoom_percent, normalize_homepage, percent_for_level, resolve_input,
-    safe_file_name, shortcut_for, site_origin,
+    DownloadList, DownloadState, ExtensionSource, INSPECT_SCRIPT, InternalPage, KeyPress,
+    LoadedTab, PageCommand, Permission, SavedWindows, SearchEngine, Session, SessionTab, Settings,
+    Shortcut, SidePanelData, SitePermissions, StartupMode, SubmittedLogin, TabHistory, TabId,
+    TabStrip, UiCommand, UiEvent, WindowAction, Workspaces, describe, error_page, is_risky_file,
+    is_web_url, level_for_percent, login_origin, next_zoom_percent, normalize_homepage,
+    percent_for_level, resolve_input, safe_file_name, shortcut_for, site_origin,
     storage_types::{FolderItems, SuggestionItem},
     tabs_to_discard, unique_path,
 };
@@ -171,7 +171,8 @@ pub struct Shell {
     /// The tab a clip has been asked for, until its page answers.
     pending_clip: Option<TabId>,
     /// Pictures taken for screenshot tabs that haven't asked for them yet, as base64.
-    pending_screenshots: HashMap<TabId, String>,
+    /// Each with whether the tab is for picking a colour from it.
+    pending_screenshots: HashMap<TabId, (String, bool)>,
     /// The workspace this window belongs to. Empty is the main one, which uses the
     /// browser's original profile; any other has a profile of its own on disk.
     workspace: String,
@@ -2353,7 +2354,10 @@ fn run_command(shell: &SharedShell, command: UiCommand) {
         UiCommand::RemoveSnippet { id } => change_panel_data(|data| data.remove_snippet(id)),
         UiCommand::AddCurrentPageSnippet => add_current_page_snippet(shell),
         UiCommand::ClipPage => clip_page(shell),
-        UiCommand::Screenshot { full } => take_screenshot(shell, full),
+        UiCommand::Screenshot { full } => take_screenshot(shell, full, false),
+        UiCommand::PickColor => take_screenshot(shell, false, true),
+        UiCommand::InspectText => inspect_text(shell),
+        UiCommand::RemoveColor { hex } => change_panel_data(|data| data.remove_color(&hex)),
         UiCommand::RemoveClip { id } => change_panel_data(|data| data.remove_clip(id)),
         UiCommand::OpenClip { id } => {
             let url = panel_data().clip_url(id).map(str::to_owned);
@@ -2618,10 +2622,13 @@ fn run_page_command(shell: &SharedShell, tab: TabId, frame: &Frame, command: Pag
             with_storage(|storage| storage.set_setting(SETTING_SEARCH_ENGINE, engine.id()));
         }
         PageCommand::GetScreenshot => {
-            let data = lock(shell).pending_screenshots.remove(&tab);
-            if let Some(data) = data {
-                reply(serde_json::json!({ "type": "screenshot", "data": data }));
+            let picture = lock(shell).pending_screenshots.remove(&tab);
+            if let Some((data, pick)) = picture {
+                reply(serde_json::json!({ "type": "screenshot", "data": data, "pick": pick }));
             }
+        }
+        PageCommand::SaveColor { hex } => {
+            change_panel_data(|data| data.add_color(&hex));
         }
         PageCommand::CopyScreenshot { data } => {
             let copied = BASE64
@@ -4362,7 +4369,7 @@ fn string_param(params: &mut DictionaryValue, key: &str, value: &str) {
 
 /// Takes a picture of the active page, of what's showing or of all of it, and opens it in
 /// a new tab to mark up.
-fn take_screenshot(shell: &SharedShell, full: bool) {
+fn take_screenshot(shell: &SharedShell, full: bool, pick: bool) {
     let page = {
         let guard = lock(shell);
         guard
@@ -4386,7 +4393,7 @@ fn take_screenshot(shell: &SharedShell, full: bool) {
     let done = move |shell: &SharedShell, data: Option<String>| {
         DEV_TOOLS_WATCHES.with(|watches| watches.borrow_mut().remove(&watch));
         match data {
-            Some(data) => open_screenshot(shell, data),
+            Some(data) => open_screenshot(shell, data, pick),
             None => toast(shell, "Couldn't capture this page"),
         }
     };
@@ -4445,6 +4452,26 @@ fn take_screenshot(shell: &SharedShell, full: bool) {
     });
 }
 
+/// Starts the page inspector on the active web page: hover text to see its font and colours.
+fn inspect_text(shell: &SharedShell) {
+    let frame = active_browser(shell).and_then(|browser| browser.main_frame());
+    let is_page = {
+        let guard = lock(shell);
+        guard
+            .strip
+            .active_id()
+            .and_then(|id| guard.strip.get(id))
+            .is_some_and(|tab| is_web_url(&tab.page.url))
+    };
+    match frame.filter(|_| is_page) {
+        Some(frame) => {
+            frame.execute_java_script(Some(&CefString::from(INSPECT_SCRIPT)), None, 0);
+            toast(shell, "Hover text to see its font. Esc to stop");
+        }
+        None => toast(shell, "Only web pages can be inspected"),
+    }
+}
+
 /// Puts a PNG on the system clipboard. Only macOS can so far.
 fn copy_png_to_clipboard(png: &[u8]) -> bool {
     #[cfg(target_os = "macos")]
@@ -4459,9 +4486,9 @@ fn copy_png_to_clipboard(png: &[u8]) -> bool {
 }
 
 /// Opens a taken picture in a new tab. The tab's page asks for it when it has loaded.
-fn open_screenshot(shell: &SharedShell, data: String) {
+fn open_screenshot(shell: &SharedShell, data: String, pick: bool) {
     let id = create_tab(shell, internal_url(InternalPage::Screenshot));
-    lock(shell).pending_screenshots.insert(id, data);
+    lock(shell).pending_screenshots.insert(id, (data, pick));
     attach_tab(shell, id);
 }
 

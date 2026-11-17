@@ -10,6 +10,7 @@ pub const MAX_SNIPPETS: usize = 100;
 pub const MAX_SNIPPET_TITLE_CHARS: usize = 80;
 pub const MAX_SNIPPET_CHARS: usize = 5_000;
 pub const MAX_CLIPS: usize = 300;
+pub const MAX_COLORS: usize = 60;
 pub const MAX_CLIP_TITLE_CHARS: usize = 200;
 pub const MAX_CLIP_URL_CHARS: usize = 2_000;
 pub const MAX_CLIP_NOTE_CHARS: usize = 2_000;
@@ -54,9 +55,13 @@ pub struct Clip {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SidePanelData {
     #[serde(default)]
     pub clips: Vec<Clip>,
+    /// Colours picked from pages, as `#RRGGBB`, newest first.
+    #[serde(default)]
+    pub colors: Vec<String>,
     pub notes: String,
     pub todos: Vec<Todo>,
     pub snippets: Vec<Snippet>,
@@ -77,6 +82,23 @@ fn clean_line(text: &str, limit: usize) -> Option<String> {
         .collect();
     let line = line.trim();
     (!line.is_empty()).then(|| clip(line, limit))
+}
+
+/// A colour as `#RRGGBB`, from `#rgb` or `#rrggbb` in any case. Nothing else is accepted.
+pub fn clean_color(text: &str) -> Option<String> {
+    let digits = text.trim().strip_prefix('#')?;
+    if !digits.chars().all(|char| char.is_ascii_hexdigit()) {
+        return None;
+    }
+    let full = match digits.len() {
+        3 => digits
+            .chars()
+            .flat_map(|char| [char, char])
+            .collect::<String>(),
+        6 => digits.to_owned(),
+        _ => return None,
+    };
+    Some(format!("#{}", full.to_ascii_uppercase()))
 }
 
 /// Text kept from a page: spaces tidied and cut at the limit. Line breaks stay.
@@ -124,6 +146,14 @@ impl SidePanelData {
                 _ => false,
             }
         });
+        let mut seen = std::collections::HashSet::new();
+        data.colors = data
+            .colors
+            .iter()
+            .filter_map(|color| clean_color(color))
+            .filter(|color| seen.insert(color.clone()))
+            .take(MAX_COLORS)
+            .collect();
         data.clips.truncate(MAX_CLIPS);
         data.clips.retain_mut(|clip| {
             let web = clip.url.starts_with("https://") || clip.url.starts_with("http://");
@@ -241,6 +271,27 @@ impl SidePanelData {
             },
         );
         true
+    }
+
+    /// Keeps a picked colour at the top. Picking one again moves it up rather than
+    /// repeating it. False if it isn't a colour.
+    pub fn add_color(&mut self, color: &str) -> bool {
+        let Some(color) = clean_color(color) else {
+            return false;
+        };
+        self.colors.retain(|saved| *saved != color);
+        self.colors.insert(0, color);
+        self.colors.truncate(MAX_COLORS);
+        true
+    }
+
+    pub fn remove_color(&mut self, color: &str) -> bool {
+        let Some(color) = clean_color(color) else {
+            return false;
+        };
+        let before = self.colors.len();
+        self.colors.retain(|saved| *saved != color);
+        self.colors.len() != before
     }
 
     pub fn remove_clip(&mut self, id: u32) -> bool {
@@ -387,6 +438,46 @@ mod tests {
         let mut data = data;
         data.add_clip("n", "https://b.example/", "", 6);
         assert_eq!(data.clips[0].id, 4);
+    }
+
+    #[test]
+    fn colours_are_tidied_kept_once_and_newest_first() {
+        let mut data = SidePanelData::default();
+        assert!(data.add_color("#ff8800"));
+        assert!(data.add_color(" #0A0 "));
+        assert!(data.add_color("#FF8800"));
+        assert_eq!(data.colors, ["#FF8800", "#00AA00"]);
+        assert!(data.remove_color("#00aa00") && !data.remove_color("#00aa00"));
+        assert_eq!(data.colors, ["#FF8800"]);
+    }
+
+    #[test]
+    fn only_real_colours_are_accepted() {
+        let mut data = SidePanelData::default();
+        for bad in [
+            "",
+            "red",
+            "#12",
+            "#12345",
+            "#1234567",
+            "#gg0000",
+            "ff8800",
+            "url(x)",
+            "#ff88\n00",
+        ] {
+            assert!(!data.add_color(bad), "{bad}");
+        }
+        assert!(data.colors.is_empty());
+        for number in 0..(MAX_COLORS + 10) {
+            data.add_color(&format!("#{number:06x}"));
+        }
+        assert_eq!(data.colors.len(), MAX_COLORS);
+    }
+
+    #[test]
+    fn saved_colours_are_checked_when_read() {
+        let json = r##"{"colors":["#ab12cd","javascript:x","#AB12CD","#fff"]}"##;
+        assert_eq!(SidePanelData::parse(json).colors, ["#AB12CD", "#FFFFFF"]);
     }
 
     #[test]

@@ -6,6 +6,7 @@ mod discard;
 mod downloads;
 mod error_page;
 mod history;
+mod inspect;
 mod logins;
 mod messages;
 mod permissions;
@@ -26,6 +27,7 @@ pub use discard::{
 pub use downloads::{Download, DownloadList, DownloadState, safe_file_name, unique_path};
 pub use error_page::error_page;
 pub use history::{TabHistory, is_risky_file};
+pub use inspect::INSPECT_SCRIPT;
 pub use logins::{LOGIN_WATCHER, SubmittedLogin, fill_script, login_origin};
 pub use messages::{BrowserState, UiCommand, UiEvent, WindowAction};
 pub use permissions::{Answer, Decision, Permission, SitePermissions, describe, site_origin};

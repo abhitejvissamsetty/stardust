@@ -133,6 +133,13 @@ pub enum UiCommand {
     AddCurrentPageSnippet,
     /// Saves the active page, with the text selected on it, as a clip.
     ClipPage,
+    /// Takes a picture of what's showing and opens it to pick a colour from.
+    PickColor,
+    /// Shows the font and colours of whatever text the pointer is over, on the active page.
+    InspectText,
+    RemoveColor {
+        hex: String,
+    },
     /// Takes a picture of the active page, of what's showing or all of it, and opens it
     /// to mark up.
     Screenshot {
@@ -221,6 +228,9 @@ impl UiCommand {
                 | Self::ClipPage
                 | Self::RemoveClip { .. }
                 | Self::OpenClip { .. }
+                | Self::RemoveColor { .. }
+                | Self::PickColor
+                | Self::InspectText
         )
     }
 }

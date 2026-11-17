@@ -165,6 +165,10 @@ impl InternalPage {
 pub enum PageCommand {
     /// The screenshot page asks for the picture that was taken for it.
     GetScreenshot,
+    /// Keeps a colour picked from a screenshot, in the side panel's colours.
+    SaveColor {
+        hex: String,
+    },
     /// Puts the marked-up picture, as base64 PNG, on the clipboard.
     CopyScreenshot {
         data: String,

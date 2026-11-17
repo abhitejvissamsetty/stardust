@@ -59,6 +59,15 @@ wrap_app! {
                 command_line.append_switch_with_value(Some(&name), Some(&value));
             }
 
+            // Pages draw in sRGB, which is what their colours are written in. Without this,
+            // a wide-gamut screen makes Chromium draw, and so capture, in the screen's own
+            // colour space, and a colour picked from a picture reads back as other numbers
+            // than the page's (#FF8800 came back as #F78801).
+            let profile = CefString::from("force-color-profile");
+            if command_line.has_switch(Some(&profile)) == 0 {
+                command_line.append_switch_with_value(Some(&profile), Some(&CefString::from("srgb")));
+            }
+
             if cfg!(target_os = "linux") {
                 let drivers = std::env::var("LIBVA_DRIVERS_PATH").ok();
                 if bridge::has_vaapi_driver(&bridge::vaapi_driver_folders(drivers.as_deref())) {

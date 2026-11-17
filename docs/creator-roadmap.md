@@ -84,7 +84,7 @@ Build these as part of the browser. Many can be done with scripts the browser in
 |---|---|---|---|
 | Screen and camera recorder, with a webcam bubble | Loom, Screencastify | L | Needs capture from Phase 0 |
 | Screenshot and annotate, full page or region | Several | M | **Built for the visible area and the whole page, see [milestone-6.md](milestone-6.md).** Region drag and copy off macOS aren't |
-| Colour picker and font identifier | ColorZilla, WhatFont | S | A browser eyedropper API exists |
+| Colour picker and font identifier | ColorZilla, WhatFont | S | **Built, see [milestone-6.md](milestone-6.md).** Needed the colour-profile change described there |
 | Web clipper to a folder of notes, Notion or Obsidian | Clippers | M | **First version built, see [milestone-6.md](milestone-6.md).** Markdown copy only; no folders, tags or direct export yet |
 | Thumbnail preview: how a title and image look in search and feeds | Part of vidIQ, TubeBuddy | M | |
 | Quick tools menu: resize, convert and compress an image or short video | Many small sites | M | |

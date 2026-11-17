@@ -802,6 +802,8 @@ function commandBarItems() {
   command("Reopen closed tab", shortcut("T", { shift: true }), { type: "reopenClosedTab" });
   command("Close this tab", shortcut("W"), { type: "closeTab", id: strip.activeId });
   command("Clip this page", shortcut("S", { shift: true }), { type: "clipPage" });
+  command("Pick a colour from the page", "Command", { type: "pickColor" });
+  command("Identify fonts and colours of text", "Command", { type: "inspectText" });
   command("Screenshot: what's showing", "Command", { type: "screenshot", full: false });
   command("Screenshot: the whole page", "Command", { type: "screenshot", full: true });
   command(splitIds.length ? "Close split view" : "Split view", "Command", { type: "toggleSplitView" });
@@ -944,6 +946,8 @@ function openAppMenu() {
     { label: "Extensions", command: page("extensions") },
     { label: "Command bar: find tabs, workspaces, commands", shortcut: shortcut("A", { shift: true }), command: { type: "commandBar" } },
     { label: "Clip this page", shortcut: shortcut("S", { shift: true }), command: { type: "clipPage" } },
+    { label: "Pick a colour from the page", command: { type: "pickColor" } },
+    { label: "Identify fonts and colours of text", command: { type: "inspectText" } },
     { label: "Screenshot: what's showing", command: { type: "screenshot", full: false } },
     { label: "Screenshot: the whole page", command: { type: "screenshot", full: true } },
     { label: sidePanelOpen ? "Close the side panel" : "Side panel: notes, to-dos, snippets", shortcut: shortcut("E", { shift: true }), command: { type: "toggleSidePanel" } },

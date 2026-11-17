@@ -22,7 +22,7 @@
       .tabs { display: flex; flex: 1; gap: var(--space-1); }
       .tab {
         background: transparent; border: 0; border-radius: 6px; color: var(--text-muted);
-        cursor: default; height: 30px; padding: 0 var(--space-2);
+        cursor: default; font-size: 12.5px; height: 30px; padding: 0 5px; white-space: nowrap;
       }
       .tab:hover { background: var(--hover); color: var(--text); }
       .tab[aria-selected="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
@@ -60,6 +60,12 @@
       .link { background: transparent; border: 0; color: var(--accent); cursor: default; padding: 0; text-align: left; }
       .link:hover { text-decoration: underline; }
       .snippet .note { border-left: 2px solid var(--divider); padding-left: 8px; }
+      .swatches { display: grid; flex: 1; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); align-content: start; overflow-y: auto; }
+      .chip { position: relative; text-align: center; }
+      .swatch { border: 1px solid var(--divider); border-radius: 8px; cursor: default; height: 48px; padding: 0; width: 100%; }
+      .chip .hex { color: var(--text-muted); display: block; font: 11px ui-monospace, Menlo, monospace; padding-top: 3px; }
+      .chip-x { background: var(--surface); border: 1px solid var(--divider); border-radius: 50%; display: none; height: 18px; position: absolute; right: -4px; top: -4px; width: 18px; font-size: 12px; }
+      .chip:hover .chip-x { display: flex; }
       .empty { color: var(--text-muted); padding: var(--space-3) var(--space-2); }
       input[type="checkbox"] { accent-color: var(--accent); flex: none; height: 16px; margin: 0; width: 16px; }
     </style>
@@ -71,6 +77,7 @@
         <button class="tab" role="tab" data-tab="todos" aria-selected="false">To-do</button>
         <button class="tab" role="tab" data-tab="snippets" aria-selected="false">Snippets</button>
         <button class="tab" role="tab" data-tab="clips" aria-selected="false">Clips</button>
+        <button class="tab" role="tab" data-tab="colors" aria-selected="false">Colours</button>
       </div>
       <button class="icon" id="close" title="Close the side panel" aria-label="Close the side panel">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17" /></svg>
@@ -111,6 +118,15 @@
       <div class="status" id="clip-status" role="status"></div>
     </section>
 
+    <section id="colors-section" role="tabpanel" hidden>
+      <div class="row">
+        <button class="primary" id="pick-colour" type="button">Pick from the page</button>
+        <button class="quiet" id="inspect-text" type="button">Identify text</button>
+      </div>
+      <div class="swatches" id="swatch-list"></div>
+      <div class="row"><span class="status" id="colors-status" style="flex:1" role="status"></span><button class="quiet" id="copy-colors" type="button">Copy all</button></div>
+    </section>
+
     <script>
       "use strict";
       const send = (command) => window.browserBridge.send(JSON.stringify(command));
@@ -122,7 +138,7 @@
         return element;
       };
 
-      let data = { notes: "", todos: [], snippets: [], clips: [] };
+      let data = { notes: "", todos: [], snippets: [], clips: [], colors: [] };
       let saveTimer = null;
       let statusTimer = null;
 
@@ -131,7 +147,7 @@
         for (const tab of document.querySelectorAll(".tab")) {
           tab.setAttribute("aria-selected", String(tab.dataset.tab === name));
         }
-        for (const id of ["notes", "todos", "snippets", "clips"]) {
+        for (const id of ["notes", "todos", "snippets", "clips", "colors"]) {
           byId(`${id}-section`).hidden = id !== name;
         }
         try { sessionStorage.setItem("tab", name); } catch (_) {}
@@ -287,6 +303,33 @@
       byId("clip-page").addEventListener("click", () => send({ type: "clipPage" }));
       byId("copy-clips").addEventListener("click", () => copy(markdown(), "clip-status"));
 
+      // Colours -----------------------------------------------------------------
+      function renderColours() {
+        const list = byId("swatch-list");
+        byId("copy-colors").hidden = data.colors.length === 0;
+        if (data.colors.length === 0) {
+          list.replaceChildren(make("div", "empty", "No colours yet. Pick one from the page and it's kept here."));
+          return;
+        }
+        list.replaceChildren(...data.colors.map((hex) => {
+          const chip = make("div", "chip");
+          const swatch = make("button", "swatch");
+          swatch.style.background = hex;
+          swatch.title = `${hex}. Click to copy`;
+          swatch.setAttribute("aria-label", `Copy ${hex}`);
+          swatch.addEventListener("click", () => copy(hex, "colors-status"));
+          const remove = make("button", "icon chip-x", "×");
+          remove.title = "Remove";
+          remove.setAttribute("aria-label", `Remove ${hex}`);
+          remove.addEventListener("click", () => send({ type: "removeColor", hex }));
+          chip.append(swatch, remove, make("span", "hex", hex));
+          return chip;
+        }));
+      }
+      byId("pick-colour").addEventListener("click", () => send({ type: "pickColor" }));
+      byId("inspect-text").addEventListener("click", () => send({ type: "inspectText" }));
+      byId("copy-colors").addEventListener("click", () => copy(data.colors.join("\n"), "colors-status"));
+
       // What the browser sends: the notes, to-dos and snippets, for every window to share.
       window.onBrowserEvent = (event) => {
         if (event.type !== "panelData") {
@@ -301,6 +344,7 @@
         renderTodos();
         renderSnippets();
         renderClips();
+        renderColours();
       };
 
       try { showTab(sessionStorage.getItem("tab") || "notes"); } catch (_) { showTab("notes"); }

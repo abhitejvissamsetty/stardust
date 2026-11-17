@@ -1,4 +1,4 @@
-# Milestone 6: workspaces, vertical tabs, split view, side panel, command bar, web clipper, screenshots and the new icon
+# Milestone 6: workspaces, vertical tabs, split view, side panel, command bar, web clipper, screenshots, colour picker and the new icon
 
 Built and tested on macOS (Apple Silicon) on 2026-11-17. This is the first piece of Phase 1 of [creator-roadmap.md](creator-roadmap.md). Tested by driving the browser through Chromium's debugging protocol with real clicks, and by screenshots of Stardust's own pages. The native window frame wasn't looked at.
 
@@ -18,6 +18,7 @@ Built and tested on macOS (Apple Silicon) on 2026-11-17. This is the first piece
 | Command bar: find tabs, workspaces and commands | **Done** and tested |
 | Web clipper: save pages and selected text to the side panel | **Done** and tested |
 | Screenshot and annotate | **Done** and tested on macOS |
+| Colour picker and font identifier | **Done** and tested on macOS |
 | Icon for Windows and Linux | **Not done**, see below |
 
 ## The icon
@@ -224,6 +225,41 @@ On macOS, with real mouse events on the editor: visible-area and whole-page capt
 - **A keyboard shortcut.** It's in the menu and command bar.
 - **Screen and window capture, and recording.** That's a separate piece (capture and a picker, in Phase 0) and still needs research.
 - **The block effect** was drawn but, on a plain-coloured test page, can't be seen changing anything. Not checked on real text.
+
+## Colour picker and font identifier
+
+Two tools, from the menu, the command bar and the side panel's new **Colours** tab.
+
+**Pick a colour from the page.** A picture of what's showing opens in the screenshot editor with the eyedropper ready. A magnifier follows the pointer, showing the pixels under it and the colour's `#RRGGBB` and `rgb()`. A click copies the hex code, shows it in a strip of the last few picked, and keeps it in the Colours tab (newest first, up to 60, a colour only once). The eyedropper is also one of the editor's tools, so it works on any screenshot.
+
+**Identify fonts and colours of text.** The page shows a small card beside the pointer for whatever text it's over, and outlines that element: the font's name, size, weight (and italic), line height and letter spacing, the text colour, the colour behind it, and the full font list the page asked for. A click copies a one-line summary (`Georgia, 44px, weight 700, #112233 on #00AA00 (Georgia, serif)`) and stops; Escape or running it again stops too. It never changes the page, and links don't open while it's on.
+
+**Colours tab:** each colour is a swatch you click to copy; hover for a remove button; "Copy all" puts the list on the clipboard one per line; and buttons start the two tools.
+
+### Accuracy, and a decision for the owner
+
+- Picking from a picture of the page is only as good as the picture. On this Mac, Chromium drew and captured in the screen's own wide-gamut colour space, so `#FF8800` read back as `#F78801` and `#00AA00` as `#32AA00`. That's no use for a colour picker.
+- **Stardust now starts Chromium with `--force-color-profile=srgb`**, which makes it draw in sRGB, the space page colours are written in. With it, all three test colours came back exactly (`#FF8800`, `#00AA00`, `#112233`). The cost: it applies to everything, so wide-gamut (Display P3) colours in pages and video are shown as sRGB. For most sites nothing changes, but it's a change to how everything is drawn. It's one switch in `crates/cef-host/src/app.rs` and is skipped if the switch is already given on the command line. Decide whether to keep it.
+- The font card shows the font the page *asked for* (the first in its list), not the one actually drawn when the first isn't installed. Finding the drawn one needs the DevTools `CSS.getPlatformFontsForNode`, which isn't used yet.
+
+### How it works
+
+- The picker reuses the screenshot capture, then reads pixels from the untouched picture (no marks), so a colour is the page's own.
+- The font card is a script (`INSPECT_SCRIPT`) the browser runs in the active page's main frame. It's fixed text, takes no input, and draws inside a closed shadow root so the page's styles don't affect it.
+- Saved colours are checked wherever they're read or added: only `#rgb` or `#rrggbb`, turned into upper-case `#RRGGBB`, with unit tests.
+
+### Tested
+
+On macOS with real mouse events: the magnifier and its label, picking three colours and checking them against the page's CSS values, the Colours tab (screenshot), Copy all, clicking a swatch (clipboard checked), and the font card (screenshot of the card, then a click and the clipboard checked, and the inspector stopped). Unit tests cover colour tidying, duplicates, the limit and bad input.
+
+### Not tested or not built
+
+- **Windows and Linux.** The colour accuracy fix and the picker are untested there.
+- **Picking colours outside the page,** such as from another app or the screen (that would need screen capture).
+- **The font actually drawn** (above), and a colour format choice (HSL, `rgb()` copy, Tailwind or CSS variable names).
+- **Palettes from an image or a page,** contrast checking, and sharing colours with a design tool.
+- The font card in frames inside a page, and on pages that stop mouse events from reaching it.
+- **A keyboard shortcut.**
 
 ## Tests
 
