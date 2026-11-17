@@ -2101,6 +2101,18 @@ pub fn select_tab(shell: &SharedShell, id: TabId) {
     publish(shell);
 }
 
+/// Gives the address bar the keyboard, ready to take a command-bar search.
+fn open_command_bar(shell: &SharedShell) {
+    let toolbar = lock(shell).toolbar.clone();
+    if let Some(toolbar) = toolbar {
+        let mut browser = toolbar.clone();
+        if let Some(view) = browser_view_get_for_browser(Some(&mut browser)) {
+            view.request_focus();
+        }
+        send_to_toolbar(Some(&toolbar), &UiEvent::CommandBar);
+    }
+}
+
 fn focus_address(shell: &SharedShell) {
     let toolbar = lock(shell).toolbar.clone();
     if let Some(toolbar) = toolbar {
@@ -2316,6 +2328,7 @@ fn run_command(shell: &SharedShell, command: UiCommand) {
         UiCommand::OpenWorkspace { id } => open_workspace(&id),
         UiCommand::ToggleSplitView => toggle_split_view(shell),
         UiCommand::ToggleSidePanel => toggle_side_panel(shell),
+        UiCommand::CommandBar => open_command_bar(shell),
         // Only the side panel sends this, and it's handled where it arrives.
         UiCommand::SidePanelReady => {}
         UiCommand::SetNotes { text } => change_panel_data(|data| {
@@ -2806,6 +2819,7 @@ fn run_shortcut(shell: &SharedShell, event: &KeyEvent) -> bool {
     };
     match shortcut {
         Shortcut::FocusAddress => focus_address(shell),
+        Shortcut::CommandBar => open_command_bar(shell),
         Shortcut::NewTab => new_tab(shell),
         Shortcut::Find => open_find(shell),
         Shortcut::FindNext | Shortcut::FindPrevious => {

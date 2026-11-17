@@ -156,7 +156,8 @@ window.onBrowserEvent = (event) => {
     element.append(title, url);
     element.addEventListener("mousedown", (click) => {
       click.preventDefault();
-      send({ type: "navigate", input: item.url });
+      // A command-bar result carries what to do; an address suggestion is opened.
+      send(item.command ?? { type: "navigate", input: item.url });
       send({ type: "hidePopup" });
     });
     return element;

@@ -36,6 +36,8 @@ pub enum Shortcut {
     Settings,
     Downloads,
     ToggleSidePanel,
+    /// Chrome calls this "Search tabs"; here it also finds workspaces and commands.
+    CommandBar,
 }
 
 /// A key press, using Windows virtual key codes as CEF reports them on every platform.
@@ -56,6 +58,7 @@ const KEY_9: i32 = 0x39;
 const T: i32 = 0x54;
 const LEFT: i32 = 0x25;
 const RIGHT: i32 = 0x27;
+const A: i32 = 0x41;
 const D: i32 = 0x44;
 const E: i32 = 0x45;
 const F: i32 = 0x46;
@@ -141,6 +144,7 @@ pub fn shortcut_for(key: KeyPress, is_mac: bool) -> Option<Shortcut> {
         (P, true, false, false) => Some(Shortcut::Print),
         (N, true, true, false) => Some(Shortcut::NewPrivateWindow),
         (E, true, true, false) => Some(Shortcut::ToggleSidePanel),
+        (A, true, true, false) => Some(Shortcut::CommandBar),
         (T, true, true, false) => Some(Shortcut::ReopenClosedTab),
         // Chrome on macOS: Cmd+M minimizes, and Ctrl+Cmd+F toggles full screen.
         (M, true, false, false) if is_mac => Some(Shortcut::Minimize),
@@ -205,6 +209,14 @@ mod tests {
         assert_eq!(
             shortcut_for(ctrl(E, true), false),
             Some(Shortcut::ToggleSidePanel)
+        );
+        assert_eq!(
+            shortcut_for(cmd(A, true, false), true),
+            Some(Shortcut::CommandBar)
+        );
+        assert_eq!(
+            shortcut_for(ctrl(A, true), false),
+            Some(Shortcut::CommandBar)
         );
         // Without Shift, the key isn't taken.
         assert_eq!(shortcut_for(cmd(E, false, false), true), None);

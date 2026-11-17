@@ -395,6 +395,8 @@ const POPUP_ROW = 36;
 let suggestions = [];
 let selectedSuggestion = -1;
 let typedQuery = "";
+// The address bar is a command bar while its text starts with ">".
+let commandMode = false;
 
 function showPopupUnder(element, items, selected, minimumWidth = 0) {
   const box = element.getBoundingClientRect();
@@ -409,6 +411,7 @@ function showPopupUnder(element, items, selected, minimumWidth = 0) {
 }
 
 function hideSuggestions() {
+  commandMode = false;
   if (suggestions.length > 0) {
     suggestions = [];
     selectedSuggestion = -1;
@@ -541,6 +544,8 @@ window.onBrowserEvent = (event) => {
       }
     }
     render();
+  } else if (event.type === "commandBar") {
+    openCommandBar();
   } else if (event.type === "focusAddress") {
     address.focus();
     address.select();
@@ -656,6 +661,10 @@ reload.addEventListener("click", () => {
 
 byId("address-form").addEventListener("submit", (event) => {
   event.preventDefault();
+  if (commandMode) {
+    runCommandResult();
+    return;
+  }
   hideSuggestions();
   send({ type: "navigate", input: address.value });
   address.blur();
@@ -663,6 +672,11 @@ byId("address-form").addEventListener("submit", (event) => {
 
 address.addEventListener("input", () => {
   typedQuery = address.value;
+  if (address.value.startsWith(">")) {
+    showCommandResults();
+    return;
+  }
+  commandMode = false;
   const query = address.value.trim();
   if (query) {
     send({ type: "suggest", query });
@@ -695,13 +709,22 @@ address.addEventListener("blur", () => {
   }, 200);
 });
 address.addEventListener("keydown", (event) => {
-  if ((event.key === "ArrowDown" || event.key === "ArrowUp") && suggestions.length > 0) {
+  if ((event.key === "ArrowDown" || event.key === "ArrowUp") && commandMode && suggestions.length > 0) {
+    event.preventDefault();
+    const step = event.key === "ArrowDown" ? 1 : -1;
+    selectedSuggestion = (selectedSuggestion + step + suggestions.length) % suggestions.length;
+    showPopupUnder(byId("address-form"), suggestions, selectedSuggestion);
+  } else if ((event.key === "ArrowDown" || event.key === "ArrowUp") && suggestions.length > 0) {
     event.preventDefault();
     const step = event.key === "ArrowDown" ? 1 : -1;
     const positions = suggestions.length + 1;
     selectedSuggestion = ((selectedSuggestion + 1 + step + positions) % positions) - 1;
     address.value = selectedSuggestion >= 0 ? suggestions[selectedSuggestion].url : typedQuery;
     showPopupUnder(byId("address-form"), suggestions, selectedSuggestion);
+  } else if (event.key === "Escape" && commandMode) {
+    hideSuggestions();
+    address.value = shownUrl(activeTab()?.url ?? "");
+    address.select();
   } else if (event.key === "Escape") {
     if (suggestions.length > 0) {
       hideSuggestions();
@@ -734,6 +757,121 @@ function renderSiteInfo(tab) {
   byId("warn-icon").toggleAttribute("hidden", !insecure);
   byId("site-info-label").textContent = insecure ? "Not secure" : "";
   info.title = secure ? "Connection is secure" : insecure ? "This page isn't encrypted, so others on the network could see it" : "";
+}
+
+// -- Command bar --------------------------------------------------------------------------
+//
+// The address bar, switched to search what's open and what can be done, when its text
+// starts with ">". Nothing here is sent to a search engine or a website.
+
+const COMMAND_RESULTS = 8;
+
+// Everything the bar can do, as {title, hint, command}. Built each time, so its labels
+// match what's showing now.
+function commandBarItems() {
+  const page = (name) => ({ type: "openPage", page: name });
+  const items = [];
+  for (const tab of strip.tabs) {
+    if (tab.id !== strip.activeId) {
+      items.push({ title: tabLabel(tab), hint: "Tab", command: { type: "selectTab", id: tab.id }, group: 0 });
+    }
+  }
+  if (workspacesState.items.length > 1 && !document.documentElement.hasAttribute("data-private")) {
+    for (const item of workspacesState.items) {
+      if (item.id !== workspacesState.current) {
+        items.push({ title: `Workspace: ${item.name}`, hint: "Workspace", command: { type: "openWorkspace", id: item.id }, group: 1 });
+      }
+    }
+  }
+  const command = (title, hint, run) => items.push({ title, hint, command: run, group: 2 });
+  command("New tab", shortcut("T"), { type: "newTab" });
+  command("New window", shortcut("N"), { type: "newWindow" });
+  command("New private window", shortcut("N", { shift: true }), { type: "newPrivateWindow" });
+  command("Reopen closed tab", shortcut("T", { shift: true }), { type: "reopenClosedTab" });
+  command("Close this tab", shortcut("W"), { type: "closeTab", id: strip.activeId });
+  command(splitIds.length ? "Close split view" : "Split view", "Command", { type: "toggleSplitView" });
+  command(sidePanelOpen ? "Close the side panel" : "Open the side panel", shortcut("E", { shift: true }), { type: "toggleSidePanel" });
+  command(tabLayout.vertical ? "Show tabs across the top" : "Show tabs down the side", "Command", { type: "setVerticalTabs", enabled: !tabLayout.vertical });
+  command("Reload", shortcut("R"), { type: "reload" });
+  command("Find in page", shortcut("F"), { type: "openFind" });
+  command("Bookmark this page", shortcut("D"), { type: "toggleBookmark" });
+  command("Zoom in", shortcut("+"), { type: "zoomIn" });
+  command("Zoom out", shortcut("-"), { type: "zoomOut" });
+  command("Reset zoom", shortcut("0"), { type: "zoomReset" });
+  command("Print", shortcut("P"), { type: "print" });
+  command("Developer tools", isMac ? "⌥⌘I" : "F12", { type: "devTools" });
+  command("Full screen", isMac ? "⌃⌘F" : "F11", { type: "windowAction", action: "toggleFullscreen" });
+  command("History", shortcut("H"), page("history"));
+  command("Downloads", shortcut("J"), page("downloads"));
+  command("Bookmarks", shortcut("O", { shift: true }), page("bookmarks"));
+  command("Extensions", "Page", page("extensions"));
+  command("Settings", shortcut(","), page("settings"));
+  command("Quit Stardust", shortcut("Q"), { type: "quit" });
+  return items;
+}
+
+// How well a query matches a title, or -1 for not at all. Starting with it beats starting
+// a word with it, which beats containing it, which beats its letters appearing in order.
+function matchScore(title, query) {
+  const text = title.toLowerCase();
+  const wanted = query.toLowerCase();
+  if (!wanted) {
+    return 0;
+  }
+  if (text.startsWith(wanted)) {
+    return 100;
+  }
+  const at = text.indexOf(wanted);
+  if (at > 0) {
+    return /[\s:/.\-_]/.test(text[at - 1]) ? 80 : 60;
+  }
+  let next = 0;
+  for (const char of wanted) {
+    next = text.indexOf(char, next) + 1;
+    if (next === 0) {
+      return -1;
+    }
+  }
+  return 20;
+}
+
+function commandBarResults(query) {
+  const scored = commandBarItems()
+    .map((item, order) => ({ item, order, score: matchScore(item.title, query) }))
+    .filter((entry) => entry.score >= 0);
+  // Best match first; ties keep tabs, then workspaces, then commands, as listed.
+  scored.sort((a, b) => b.score - a.score || a.item.group - b.item.group || a.order - b.order);
+  return scored.slice(0, COMMAND_RESULTS).map(({ item }) => ({ title: item.title, url: item.hint, command: item.command }));
+}
+
+function showCommandResults() {
+  commandMode = true;
+  suggestions = commandBarResults(address.value.slice(1).trim());
+  // The first result is ready, so Enter does it.
+  selectedSuggestion = suggestions.length > 0 ? 0 : -1;
+  if (suggestions.length > 0) {
+    showPopupUnder(byId("address-form"), suggestions, selectedSuggestion);
+  } else {
+    send({ type: "hidePopup" });
+  }
+}
+
+function openCommandBar() {
+  hideMenu();
+  address.focus();
+  address.value = "> ";
+  typedQuery = address.value;
+  address.setSelectionRange(address.value.length, address.value.length);
+  showCommandResults();
+}
+
+function runCommandResult() {
+  const result = suggestions[Math.max(selectedSuggestion, 0)];
+  hideSuggestions();
+  address.blur();
+  if (result?.command) {
+    send(result.command);
+  }
 }
 
 // -- Menus -------------------------------------------------------------------------------
@@ -789,6 +927,7 @@ function openAppMenu() {
     { label: "Downloads", shortcut: shortcut("J"), command: page("downloads") },
     { label: "Bookmarks", shortcut: shortcut("O", { shift: true }), command: page("bookmarks") },
     { label: "Extensions", command: page("extensions") },
+    { label: "Command bar: find tabs, workspaces, commands", shortcut: shortcut("A", { shift: true }), command: { type: "commandBar" } },
     { label: sidePanelOpen ? "Close the side panel" : "Side panel: notes, to-dos, snippets", shortcut: shortcut("E", { shift: true }), command: { type: "toggleSidePanel" } },
     { label: splitIds.length ? "Close split view" : "Split view: two pages side by side", command: { type: "toggleSplitView" } },
     { label: tabLayout.vertical ? "Show tabs across the top" : "Show tabs down the side", command: { type: "setVerticalTabs", enabled: !tabLayout.vertical } },

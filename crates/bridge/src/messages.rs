@@ -105,6 +105,8 @@ pub enum UiCommand {
     ToggleSplitView,
     /// Opens the side panel beside the page, or closes it.
     ToggleSidePanel,
+    /// Opens the command bar.
+    CommandBar,
     /// The side panel's page has loaded and can be sent what it shows.
     SidePanelReady,
     SetNotes {
@@ -265,6 +267,8 @@ pub enum UiEvent<'a> {
         items: &'a [Download],
     },
     FocusAddress,
+    /// Opens the command bar: the address bar, ready to search tabs, workspaces and commands.
+    CommandBar,
     Suggestions {
         query: &'a str,
         items: &'a [storage_types::SuggestionItem],

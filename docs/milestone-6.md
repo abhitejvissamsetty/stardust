@@ -1,4 +1,4 @@
-# Milestone 6: workspaces, vertical tabs, split view, side panel and the new icon
+# Milestone 6: workspaces, vertical tabs, split view, side panel, command bar and the new icon
 
 Built and tested on macOS (Apple Silicon) on 2026-11-17. This is the first piece of Phase 1 of [creator-roadmap.md](creator-roadmap.md). Tested by driving the browser through Chromium's debugging protocol with real clicks, and by screenshots of Stardust's own pages. The native window frame wasn't looked at.
 
@@ -15,6 +15,7 @@ Built and tested on macOS (Apple Silicon) on 2026-11-17. This is the first piece
 | Vertical tabs: a tab list down the left, collapsible to icons | **Done** and tested |
 | Split view: two pages side by side | **Done** and tested, but not by clicking a pane |
 | Side panel: notes, to-do list and snippets | **Done** and tested |
+| Command bar: find tabs, workspaces and commands | **Done** and tested |
 | Icon for Windows and Linux | **Not done**, see below |
 
 ## The icon
@@ -135,6 +136,28 @@ With real mouse and keyboard events: typing notes, adding and ticking to-dos, sa
 - **Private windows** share the same data (above).
 - **Inserting a snippet into a page,** or saving a selection from a page. Only Copy and the page's link are there.
 - **Search or tags** in the panel, and export. The data is plain JSON in the settings table.
+- Windows and Linux.
+
+## Command bar
+
+Cmd/Ctrl+Shift+A (Chrome's "Search tabs" shortcut), the menu item, or typing `>` at the start of the address bar. The address bar becomes a quick switcher and shows up to 8 results under it.
+
+- **What it finds:** the other open tabs (Enter switches to one), the other workspaces (Enter opens one), and about 25 commands: new tab, window and private window; reopen and close tab; split view; side panel; vertical tabs; reload, find, bookmark, zoom, print, developer tools, full screen; History, Downloads, Bookmarks, Extensions, Settings; quit. Labels follow the current state ("Close split view" while one is open) and show each command's shortcut.
+- **Ranking:** a title that starts with what you typed comes first, then one with a word that starts with it, then one that contains it, then one with the letters in order. Ties keep tabs, then workspaces, then commands. An empty search lists the tabs, then the commands.
+- **Keys:** the first result is ready, so Enter runs it; Up and Down move between results; Escape leaves the bar and restores the address. Clicking a result also runs it.
+- **Private:** it never sends what you type to a search engine or a website, and it's all built in the toolbar's page from what's open, so nothing needs a round trip. Workspaces aren't listed in private windows.
+- Built into the address bar's existing suggestion list rather than as a new window, so it adds no process and no new commands for a page to send.
+
+### Tested
+
+Real key presses and a real mouse click in the running browser: opening it, ranking ("split" gives Split view first, "logi" gives the Login tab, "chan" gives a workspace), Down and Up, Enter on a tab, on a command (it started a split view) and on a workspace result, Escape, and clicking a result.
+
+### Not tested or not built
+
+- **The shortcut on the keyboard,** only its unit test. The menu item and `>` work.
+- **Bookmarks and history** aren't searched here: typing normally in the address bar still does that.
+- **Recent use:** results aren't ordered by what you used lately, and it doesn't learn.
+- **Your own commands**, and arguments such as "move tab to workspace…".
 - Windows and Linux.
 
 ## Tests
