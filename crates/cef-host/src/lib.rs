@@ -77,6 +77,20 @@ pub fn run_helper() -> i32 {
     )
 }
 
+/// The style of every browser and window. Alloy draws no browser interface of its own,
+/// so Stardust's pages are the whole interface. Chrome style brings Chrome's own
+/// interface and the only support for Chrome extensions, and every browser in a window
+/// must share one style. `STARDUST_STYLE=chrome` tries it.
+pub(crate) fn runtime_style() -> RuntimeStyle {
+    static CHROME: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if *CHROME.get_or_init(|| std::env::var("STARDUST_STYLE").is_ok_and(|style| style == "chrome"))
+    {
+        RuntimeStyle::CHROME
+    } else {
+        RuntimeStyle::ALLOY
+    }
+}
+
 pub(crate) fn data_dir() -> Option<std::path::PathBuf> {
     directories::ProjectDirs::from("com", "Ambiqa", "Stardust")
         .map(|dirs| dirs.data_dir().to_path_buf())

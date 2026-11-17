@@ -13,6 +13,7 @@ sandbox = ["cef/sandbox"]
 [dependencies]
 bridge = { path = "../bridge" }
 cef.workspace = true
+extensions = { path = "../extensions" }
 import = { path = "../import" }
 update = { path = "../update" }
 serde = { version = "1", features = ["derive"] }

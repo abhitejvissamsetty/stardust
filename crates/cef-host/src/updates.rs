@@ -165,7 +165,10 @@ pub fn restart_if_asked() {
         return;
     }
     if let Ok(executable) = std::env::current_exe() {
-        let _ = std::process::Command::new(executable).spawn();
+        // The same options as before, such as which address to open.
+        let _ = std::process::Command::new(executable)
+            .args(std::env::args().skip(1))
+            .spawn();
     }
 }
 

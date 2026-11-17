@@ -5,9 +5,9 @@ use cef::*;
 
 use crate::{
     client::{
-        SharedShell, ToolbarClient, adopt_menu_view, clear_window, load_background_tabs,
-        prepare_tabs, register_shell, schedule_discard_check, select_tab, set_window,
-        startup_windows, toolbar_height, try_close_all, window_activated,
+        SharedShell, ToolbarClient, adopt_menu_view, clear_window, extension_load_paths,
+        load_background_tabs, prepare_tabs, register_shell, schedule_discard_check, select_tab,
+        set_window, startup_windows, toolbar_height, try_close_all, window_activated,
     },
     render::BridgeInstaller,
     ui::toolbar_url,
@@ -25,20 +25,43 @@ wrap_app! {
             Some(BridgeInstaller::new())
         }
 
-        // On Linux, video decodes on the GPU only with VA-API turned on, which helps
-        // where a driver is installed. Other systems do it by default.
+        // Two things only the browser process can ask for:
+        // - The enabled extensions, which Chromium loads only as it starts.
+        // - On Linux, VA-API, which decodes video on the GPU where a driver is
+        //   installed. Other systems do it by default.
         fn on_before_command_line_processing(
             &self,
             process_type: Option<&CefString>,
             command_line: Option<&mut CommandLine>,
         ) {
             let is_browser = process_type.is_none_or(|kind| kind.to_string().is_empty());
-            if let (true, true, Some(command_line)) = (cfg!(target_os = "linux"), is_browser, command_line) {
+            let (true, Some(command_line)) = (is_browser, command_line) else {
+                return;
+            };
+            let value_of = |command_line: &CommandLine, name: &CefString| {
+                CefString::from(&command_line.switch_value(Some(name))).to_string()
+            };
+
+            // Paths are separated by commas, so one holding a comma can't be named.
+            let mut paths: Vec<String> = extension_load_paths()
+                .iter()
+                .map(|path| path.to_string_lossy().into_owned())
+                .filter(|path| !path.contains(','))
+                .collect();
+            if !paths.is_empty() {
+                let name = CefString::from("load-extension");
+                // Any given on the command line stay, as for testing.
+                let given = value_of(command_line, &name);
+                paths.extend(given.split(',').filter(|path| !path.is_empty()).map(str::to_owned));
+                let value = CefString::from(paths.join(",").as_str());
+                command_line.append_switch_with_value(Some(&name), Some(&value));
+            }
+
+            if cfg!(target_os = "linux") {
                 let drivers = std::env::var("LIBVA_DRIVERS_PATH").ok();
                 if bridge::has_vaapi_driver(&bridge::vaapi_driver_folders(drivers.as_deref())) {
                     let name = CefString::from("enable-features");
-                    let existing = CefString::from(&command_line.switch_value(Some(&name))).to_string();
-                    let features = bridge::add_features(&existing, &bridge::VAAPI_FEATURES);
+                    let features = bridge::add_features(&value_of(command_line, &name), &bridge::VAAPI_FEATURES);
                     command_line.append_switch_with_value(Some(&name), Some(&CefString::from(features.as_str())));
                 }
             }
@@ -129,7 +152,12 @@ wrap_browser_view_delegate! {
 
     impl BrowserViewDelegate {
         fn browser_runtime_style(&self) -> RuntimeStyle {
-            RuntimeStyle::ALLOY
+            crate::runtime_style()
+        }
+
+        // Stardust's toolbar is its own page, not Chrome's.
+        fn chrome_toolbar_type(&self, _browser_view: Option<&mut BrowserView>) -> ChromeToolbarType {
+            ChromeToolbarType::NONE
         }
 
         fn delegate_for_popup_browser_view(
@@ -163,7 +191,7 @@ wrap_browser_view_delegate! {
 
     impl BrowserViewDelegate {
         fn browser_runtime_style(&self) -> RuntimeStyle {
-            RuntimeStyle::ALLOY
+            crate::runtime_style()
         }
     }
 }
@@ -237,7 +265,7 @@ wrap_window_delegate! {
         }
 
         fn window_runtime_style(&self) -> RuntimeStyle {
-            RuntimeStyle::ALLOY
+            crate::runtime_style()
         }
     }
 }

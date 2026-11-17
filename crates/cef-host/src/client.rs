@@ -1,18 +1,18 @@
 //! Callbacks for the browsers in the window: the toolbar and one page per tab.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use bridge::{
     Answer, DISCARD_CHECK_MS, DISCARD_IDLE_MS, DISCARD_LOADED_LIMIT, Decision, Download,
-    DownloadList, DownloadState, InternalPage, KeyPress, LoadedTab, PageCommand, Permission,
-    SavedWindows, SearchEngine, Session, SessionTab, Settings, Shortcut, SitePermissions,
-    StartupMode, SubmittedLogin, TabHistory, TabId, TabStrip, UiCommand, UiEvent, WindowAction,
-    describe, error_page, is_risky_file, is_web_url, login_origin, normalize_homepage,
-    resolve_input, safe_file_name, shortcut_for, site_origin,
+    DownloadList, DownloadState, ExtensionSource, InternalPage, KeyPress, LoadedTab, PageCommand,
+    Permission, SavedWindows, SearchEngine, Session, SessionTab, Settings, Shortcut,
+    SitePermissions, StartupMode, SubmittedLogin, TabHistory, TabId, TabStrip, UiCommand, UiEvent,
+    WindowAction, describe, error_page, is_risky_file, is_web_url, login_origin,
+    normalize_homepage, resolve_input, safe_file_name, shortcut_for, site_origin,
     storage_types::{FolderItems, SuggestionItem},
     tabs_to_discard, unique_path,
 };
@@ -51,6 +51,9 @@ const SETTING_ASK_DOWNLOAD_LOCATION: &str = "ask_download_location";
 const SETTING_SAVE_MEMORY: &str = "save_memory";
 const CLEAR_ORIGIN_LIMIT: u32 = 2000;
 const SETTING_SITE_PERMISSIONS: &str = "site_permissions";
+const SETTING_EXTENSIONS: &str = "extensions";
+/// Extensions waiting for the person to agree to them. More than this drops the oldest.
+const PENDING_EXTENSION_LIMIT: usize = 3;
 const MEDIA_AUDIO: u32 =
     sys::cef_media_access_permission_types_t::CEF_MEDIA_PERMISSION_DEVICE_AUDIO_CAPTURE as u32;
 const MEDIA_VIDEO: u32 =
@@ -172,6 +175,7 @@ struct SavedData {
     /// The session as last saved, to avoid rewriting it when nothing changed.
     session: Mutex<String>,
     permissions: Mutex<SitePermissions>,
+    extensions: Mutex<extensions::Registry>,
 }
 
 fn saved_data() -> &'static SavedData {
@@ -207,13 +211,181 @@ fn saved_data() -> &'static SavedData {
         let permissions = saved(SETTING_SITE_PERMISSIONS)
             .map(|json| SitePermissions::parse(&json))
             .unwrap_or_default();
+        let extensions = saved(SETTING_EXTENSIONS)
+            .map(|json| extensions::Registry::parse(&json))
+            .unwrap_or_default();
         SavedData {
             storage: storage.map(Mutex::new),
             settings: Mutex::new(settings),
             session: Mutex::default(),
             permissions: Mutex::new(permissions),
+            extensions: Mutex::new(extensions),
         }
     })
+}
+
+fn extension_registry() -> MutexGuard<'static, extensions::Registry> {
+    saved_data()
+        .extensions
+        .lock()
+        .expect("Failed to lock the extensions list")
+}
+
+fn save_extension_registry() {
+    let json = extension_registry().to_json();
+    with_storage(|storage| storage.set_setting(SETTING_EXTENSIONS, &json));
+}
+
+fn extensions_dir() -> Option<PathBuf> {
+    data_dir().map(|folder| folder.join("Extensions"))
+}
+
+/// Where extensions are unpacked while the person decides, beside the installed ones.
+fn extensions_staging_dir() -> Option<PathBuf> {
+    data_dir().map(|folder| folder.join("Extensions-staging"))
+}
+
+/// The ids of the extensions Chromium was asked to load when the browser started, to
+/// tell the person when what they've changed needs a restart.
+static EXTENSIONS_AT_START: OnceLock<BTreeSet<String>> = OnceLock::new();
+
+fn enabled_extension_ids() -> BTreeSet<String> {
+    extension_registry()
+        .entries()
+        .iter()
+        .filter(|entry| entry.enabled)
+        .map(|entry| entry.id.clone())
+        .collect()
+}
+
+/// The folders of the enabled extensions, for Chromium to load. Called once, as the
+/// browser starts. Chromium only loads extensions then, so changes wait for a restart.
+pub fn extension_load_paths() -> Vec<PathBuf> {
+    if let Some(staging) = extensions_staging_dir() {
+        // Anything left from a package nobody finished adding.
+        let _ = std::fs::remove_dir_all(staging);
+    }
+    let _ = EXTENSIONS_AT_START.set(enabled_extension_ids());
+    extensions_dir()
+        .map(|folder| extension_registry().load_paths(&folder))
+        .unwrap_or_default()
+}
+
+fn extensions_event() -> serde_json::Value {
+    let list = extensions_dir()
+        .map(|folder| extension_registry().describe(&folder))
+        .unwrap_or_default();
+    let restart_needed = EXTENSIONS_AT_START
+        .get()
+        .is_some_and(|started| *started != enabled_extension_ids());
+    serde_json::json!({ "type": "extensions", "extensions": list, "restartNeeded": restart_needed })
+}
+
+/// Packages unpacked and checked, waiting to be added or turned down.
+static PENDING_EXTENSIONS: Mutex<Vec<(u64, extensions::Prepared)>> = Mutex::new(Vec::new());
+static NEXT_EXTENSION_TOKEN: AtomicU64 = AtomicU64::new(1);
+
+fn say(frame: &Frame, event: serde_json::Value) {
+    let code = format!("window.onBrowserEvent({event})");
+    frame.execute_java_script(Some(&CefString::from(code.as_str())), None, 0);
+}
+
+/// Unpacks what the person picked and shows them what it would be able to do.
+fn prepare_extension(frame: &Frame, source: &Path) {
+    let Some(staging_root) = extensions_staging_dir() else {
+        return;
+    };
+    let token = NEXT_EXTENSION_TOKEN.fetch_add(1, Ordering::Relaxed);
+    match extensions::prepare(source, &staging_root.join(token.to_string())) {
+        Ok(prepared) => {
+            let icon = prepared
+                .summary
+                .icon
+                .as_deref()
+                .and_then(|icon| extensions::icon_data_url(&prepared.root, icon));
+            let event = serde_json::json!({
+                "type": "extensionToInstall",
+                "token": token,
+                "extension": prepared.summary,
+                "iconData": icon,
+            });
+            let mut pending = PENDING_EXTENSIONS
+                .lock()
+                .expect("Failed to lock pending extensions");
+            pending.push((token, prepared));
+            while pending.len() > PENDING_EXTENSION_LIMIT {
+                let (_, old) = pending.remove(0);
+                let _ = std::fs::remove_dir_all(old.staging);
+            }
+            drop(pending);
+            say(frame, event);
+        }
+        Err(error) => say(
+            frame,
+            serde_json::json!({ "type": "extensionError", "message": error.to_string() }),
+        ),
+    }
+}
+
+fn take_pending_extension(token: u64) -> Option<extensions::Prepared> {
+    let mut pending = PENDING_EXTENSIONS
+        .lock()
+        .expect("Failed to lock pending extensions");
+    let index = pending
+        .iter()
+        .position(|(pending_token, _)| *pending_token == token)?;
+    Some(pending.remove(index).1)
+}
+
+wrap_run_file_dialog_callback! {
+    struct ExtensionPicked {
+        frame: Frame,
+    }
+
+    impl RunFileDialogCallback {
+        fn on_file_dialog_dismissed(&self, file_paths: Option<&mut CefStringList>) {
+            let paths: Vec<String> = file_paths
+                .map(std::mem::take)
+                .map(|list| list.into_iter().collect())
+                .unwrap_or_default();
+            // Cancelling gives no paths.
+            if let Some(path) = paths.first() {
+                prepare_extension(&self.frame, Path::new(path));
+            }
+        }
+    }
+}
+
+/// Shows the system's file picker for an extension, and carries on when one is chosen.
+fn choose_extension(frame: &Frame, source: ExtensionSource) {
+    // Tests can't drive the system's file picker, so in debug builds a path in the
+    // environment stands in for it. The person still has to agree to the extension.
+    #[cfg(debug_assertions)]
+    if let Ok(path) = std::env::var("STARDUST_TEST_EXTENSION_PATH") {
+        prepare_extension(frame, Path::new(&path));
+        return;
+    }
+    let Some(host) = frame.browser().and_then(|browser| browser.host()) else {
+        return;
+    };
+    let (mode, title) = match source {
+        ExtensionSource::Folder => (FileDialogMode::OPEN_FOLDER, "Choose an extension's folder"),
+        ExtensionSource::File => (FileDialogMode::OPEN, "Choose an extension file"),
+    };
+    let mut filters = CefStringList::new();
+    if source == ExtensionSource::File {
+        for filter in [".zip", ".crx"] {
+            filters.append(filter);
+        }
+    }
+    let mut callback = ExtensionPicked::new(frame.clone());
+    host.run_file_dialog(
+        mode,
+        Some(&CefString::from(title)),
+        None,
+        Some(&mut filters),
+        Some(&mut callback),
+    );
 }
 
 fn site_permissions() -> MutexGuard<'static, SitePermissions> {
@@ -1934,6 +2106,51 @@ fn run_page_command(shell: &SharedShell, frame: &Frame, command: PageCommand) {
             settings().search_engine = engine;
             with_storage(|storage| storage.set_setting(SETTING_SEARCH_ENGINE, engine.id()));
         }
+        PageCommand::ListExtensions => reply(extensions_event()),
+        PageCommand::ChooseExtension { source } => choose_extension(frame, source),
+        PageCommand::CancelInstallExtension { token } => {
+            if let Some(prepared) = take_pending_extension(token) {
+                let _ = std::fs::remove_dir_all(prepared.staging);
+            }
+        }
+        PageCommand::ConfirmInstallExtension { token } => {
+            if let (Some(prepared), Some(folder)) =
+                (take_pending_extension(token), extensions_dir())
+            {
+                match extensions::install(prepared, &folder, now_ms(), &token.to_string()) {
+                    Ok(entry) => {
+                        extension_registry().add(entry);
+                        save_extension_registry();
+                    }
+                    Err(error) => reply(
+                        serde_json::json!({ "type": "extensionError", "message": error.to_string() }),
+                    ),
+                }
+            }
+            reply(extensions_event());
+        }
+        PageCommand::SetExtensionEnabled { id, enabled } => {
+            extension_registry().set_enabled(&id, enabled);
+            save_extension_registry();
+            reply(extensions_event());
+        }
+        PageCommand::SetExtensionPinned { id, pinned } => {
+            extension_registry().set_pinned(&id, pinned);
+            save_extension_registry();
+            reply(extensions_event());
+        }
+        PageCommand::RemoveExtension { id } => {
+            let removed = extension_registry().remove(&id);
+            if let (Some(entry), Some(folder)) = (removed, extensions_dir()) {
+                extensions::delete_files(&entry, &folder);
+            }
+            save_extension_registry();
+            reply(extensions_event());
+        }
+        PageCommand::RestartBrowser => {
+            crate::updates::restart_after_quit();
+            close_all_browsers();
+        }
         PageCommand::ListLogins => {
             let logins = with_storage(|storage| storage.logins(None)).unwrap_or_default();
             let never = with_storage(Storage::never_save_login_sites).unwrap_or_default();
@@ -2428,7 +2645,17 @@ wrap_browser_view_delegate! {
         // Every browser in a window must share a style, and Alloy draws no browser UI
         // of its own.
         fn browser_runtime_style(&self) -> RuntimeStyle {
-            RuntimeStyle::ALLOY
+            crate::runtime_style()
+        }
+
+        // Chrome style can show Chrome's toolbar, with its extensions menu, above a tab.
+        // `STARDUST_TOOLBAR=chrome` shows it, to see what extensions would look like.
+        fn chrome_toolbar_type(&self, _browser_view: Option<&mut BrowserView>) -> ChromeToolbarType {
+            if std::env::var("STARDUST_TOOLBAR").is_ok_and(|toolbar| toolbar == "chrome") {
+                ChromeToolbarType::NORMAL
+            } else {
+                ChromeToolbarType::NONE
+            }
         }
     }
 }

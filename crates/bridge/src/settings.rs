@@ -110,14 +110,16 @@ pub enum InternalPage {
     Bookmarks,
     Settings,
     Downloads,
+    Extensions,
 }
 
 impl InternalPage {
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 5] = [
         Self::History,
         Self::Bookmarks,
         Self::Settings,
         Self::Downloads,
+        Self::Extensions,
     ];
 
     pub fn address(self) -> &'static str {
@@ -126,6 +128,7 @@ impl InternalPage {
             Self::Bookmarks => "browser://bookmarks",
             Self::Settings => "browser://settings",
             Self::Downloads => "browser://downloads",
+            Self::Extensions => "browser://extensions",
         }
     }
 
@@ -211,6 +214,31 @@ pub enum PageCommand {
     Import {
         source: String,
     },
+    ListExtensions,
+    /// Asks which extension to add, by showing the system's file picker.
+    ChooseExtension {
+        source: ExtensionSource,
+    },
+    /// Adds an extension the person has looked at and agreed to.
+    ConfirmInstallExtension {
+        token: u64,
+    },
+    CancelInstallExtension {
+        token: u64,
+    },
+    SetExtensionEnabled {
+        id: String,
+        enabled: bool,
+    },
+    SetExtensionPinned {
+        id: String,
+        pinned: bool,
+    },
+    RemoveExtension {
+        id: String,
+    },
+    /// Closes the browser and starts it again, for changes that need it.
+    RestartBrowser,
     ListLogins,
     DeleteLogin {
         origin: String,
@@ -227,6 +255,16 @@ pub enum PageCommand {
     CheckForUpdates,
     /// Closes the browser and starts it again, installing a downloaded update.
     RestartToUpdate,
+}
+
+/// Where an extension to add comes from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ExtensionSource {
+    /// A folder holding an unpacked extension.
+    Folder,
+    /// A `.zip` or `.crx` file.
+    File,
 }
 
 /// Whether a page's URL can be bookmarked or kept in history.

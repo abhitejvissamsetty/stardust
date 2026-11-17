@@ -6,10 +6,12 @@ Start the browser with `--remote-debugging-port=9333`, then:
     python3 scripts/cdp.py list
     python3 scripts/cdp.py eval Toolbar 'document.getElementById("address").value'
     python3 scripts/cdp.py type Toolbar 'example'
+    python3 scripts/cdp.py shot Toolbar toolbar.png
 
 `eval` runs JavaScript in the page with that title and prints the result. `type`
 sends real key presses to the page's focused element, which pages treat as a
-person typing. Pass `--port` before the command to use another port.
+person typing. `shot` saves a PNG of the page, which is how Stardust's own
+interface (toolbar, tabs, menus, Settings) can be looked at without the screen. Pass `--port` before the command to use another port.
 
 Uses only the standard library, so it runs anywhere Python 3 does.
 """
@@ -87,6 +89,15 @@ class Session:
         )
         return result.get("result", {}).get("value", result)
 
+    def screenshot(self, path, width=None, height=None):
+        """Saves a PNG of the page, for looking at Stardust's own interface."""
+        params = {"format": "png"}
+        if width and height:
+            params["clip"] = {"x": 0, "y": 0, "width": width, "height": height, "scale": 1}
+        data = self.call("Page.captureScreenshot", params)["data"]
+        with open(path, "wb") as file:
+            file.write(base64.b64decode(data))
+
     def type(self, text):
         """Sends key presses for each character."""
         for char in text:
@@ -103,6 +114,8 @@ def main(args):
             print(f"{target['type']:<8} {target['title']!r:<30} {target['url'][:60]}")
     elif len(args) == 3 and args[0] == "eval":
         print(json.dumps(Session(port, args[1]).evaluate(args[2])))
+    elif len(args) == 3 and args[0] == "shot":
+        Session(port, args[1]).screenshot(args[2])
     elif len(args) == 3 and args[0] == "type":
         Session(port, args[1]).type(args[2])
     else:

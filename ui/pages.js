@@ -179,7 +179,212 @@ function downloadRow(item) {
   return element;
 }
 
+// -- Extensions ----------------------------------------------------------------------
+// Everything about an extension, such as its name and what it asks for, is written by
+// whoever made it, so it's only ever set as text.
+
+function el(tag, className, text) {
+  const element = document.createElement(tag);
+  if (className) {
+    element.className = className;
+  }
+  if (text !== undefined) {
+    element.textContent = text;
+  }
+  return element;
+}
+
+// A picture for an extension, or its first letter on a colour made from its name.
+function extensionIcon(name, iconData) {
+  if (iconData) {
+    const image = el("img", "ext-icon");
+    image.alt = "";
+    image.src = iconData;
+    return image;
+  }
+  let hash = 0;
+  for (const char of name) {
+    hash = (hash * 31 + char.codePointAt(0)) % 360;
+  }
+  const letter = el("div", "ext-icon fallback", [...name.trim()][0]?.toUpperCase() ?? "?");
+  letter.style.setProperty("--hue", String(hash));
+  letter.setAttribute("aria-hidden", "true");
+  return letter;
+}
+
+const extensionsState = { pendingToken: null, removeAsk: null };
+
+function warningChips(extension) {
+  const chips = [];
+  if (extension.allSites) {
+    chips.push(el("span", "chip warn", "Can read all websites"));
+  } else if (extension.hostPatterns.length > 0) {
+    chips.push(el("span", "chip", `Can read ${extension.hostPatterns.length} site pattern${extension.hostPatterns.length === 1 ? "" : "s"}`));
+  }
+  if (extension.permissions.includes("declarativeNetRequest")) {
+    chips.push(el("span", "chip", "Blocks content"));
+  }
+  if (extension.permissions.includes("cookies")) {
+    chips.push(el("span", "chip", "Cookies"));
+  }
+  if (extension.permissions.includes("history") || extension.permissions.includes("tabs")) {
+    chips.push(el("span", "chip", "Browsing"));
+  }
+  return chips;
+}
+
+function extensionCard(extension) {
+  const card = el("li", extension.enabled ? "ext-card" : "ext-card off");
+  card.dataset.id = extension.id;
+
+  const top = el("div", "ext-top");
+  top.append(extensionIcon(extension.name, extension.iconData));
+  const heading = el("div", "ext-heading");
+  const title = el("div", "ext-title");
+  title.append(el("span", "ext-name", extension.name), el("span", "ext-version", `v${extension.version}`));
+  heading.append(title, el("p", "ext-description", extension.description || "No description."));
+  top.append(heading);
+
+  const toggle = el("label", "switch");
+  const box = document.createElement("input");
+  box.type = "checkbox";
+  box.setAttribute("role", "switch");
+  box.checked = extension.enabled;
+  box.setAttribute("aria-label", `${extension.enabled ? "Turn off" : "Turn on"} ${extension.name}`);
+  box.addEventListener("change", () => send({ type: "setExtensionEnabled", id: extension.id, enabled: box.checked }));
+  toggle.append(box, el("span", "slider"));
+  top.append(toggle);
+  card.append(top);
+
+  const chips = el("div", "chips");
+  chips.append(...warningChips(extension));
+  if (extension.popupUrl) {
+    chips.append(el("span", "chip good", "Has a popup"));
+  }
+  if (chips.childElementCount > 0) {
+    card.append(chips);
+  }
+
+  const details = el("div", "ext-details");
+  details.hidden = true;
+  details.append(el("h3", "", "It can:"));
+  const can = el("ul", "permissions");
+  const warnings = extension.warnings.length > 0 ? extension.warnings : ["Work without asking for access to anything sensitive"];
+  can.append(...warnings.map((warning) => el("li", "", warning)));
+  details.append(can);
+  const facts = el("dl", "facts");
+  const fact = (label, value) => facts.append(el("dt", "", label), el("dd", "", value));
+  fact("ID", extension.id);
+  fact("Manifest", `version ${extension.manifestVersion}`);
+  if (extension.permissions.length > 0) {
+    fact("Permissions", extension.permissions.join(", "));
+  }
+  if (extension.hostPatterns.length > 0) {
+    const shown = extension.hostPatterns.slice(0, 12).join(", ");
+    const more = extension.hostPatterns.length - 12;
+    fact("Sites", more > 0 ? `${shown}, and ${more} more` : shown);
+  }
+  details.append(facts);
+  card.append(details);
+
+  const actions = el("div", "ext-actions");
+  const detailsButton = el("button", "row-action", "Details");
+  detailsButton.setAttribute("aria-expanded", "false");
+  detailsButton.addEventListener("click", () => {
+    details.hidden = !details.hidden;
+    detailsButton.setAttribute("aria-expanded", String(!details.hidden));
+  });
+  const pin = el("button", "row-action", extension.pinned ? "Unpin from toolbar" : "Pin to toolbar");
+  pin.addEventListener("click", () => send({ type: "setExtensionPinned", id: extension.id, pinned: !extension.pinned }));
+  const remove = el("button", "row-action danger", "Remove");
+  remove.addEventListener("click", () => {
+    // The first click asks, so a slip can't delete an extension.
+    if (extensionsState.removeAsk === extension.id) {
+      extensionsState.removeAsk = null;
+      send({ type: "removeExtension", id: extension.id });
+    } else {
+      extensionsState.removeAsk = extension.id;
+      remove.textContent = "Really remove?";
+      setTimeout(() => {
+        if (extensionsState.removeAsk === extension.id) {
+          extensionsState.removeAsk = null;
+          remove.textContent = "Remove";
+        }
+      }, 4000);
+    }
+  });
+  actions.append(detailsButton, pin, remove);
+  card.append(actions);
+  return card;
+}
+
+function showConfirm(event) {
+  const extension = event.extension;
+  extensionsState.pendingToken = event.token;
+  byId("confirm-title").textContent = extension.name;
+  byId("confirm-version").textContent = `Version ${extension.version}`;
+  byId("confirm-description").textContent = extension.description;
+  byId("confirm-description").hidden = !extension.description;
+  const icon = byId("confirm-icon");
+  icon.hidden = !event.iconData;
+  if (event.iconData) {
+    icon.src = event.iconData;
+  }
+  const fallback = byId("confirm-fallback");
+  fallback.hidden = Boolean(event.iconData);
+  fallback.textContent = [...extension.name.trim()][0]?.toUpperCase() ?? "?";
+  const warnings = extension.warnings.length > 0 ? extension.warnings : ["Work without asking for access to anything sensitive"];
+  byId("confirm-permissions").replaceChildren(...warnings.map((warning) => el("li", extension.allSites && warning.includes("all websites") ? "bad" : "", warning)));
+  byId("confirm").hidden = false;
+  byId("confirm-add").focus();
+}
+
+function hideConfirm() {
+  extensionsState.pendingToken = null;
+  byId("confirm").hidden = true;
+}
+
+function extensionsEvent(event) {
+  if (event.type === "extensionToInstall") {
+    byId("error-banner").hidden = true;
+    showConfirm(event);
+  } else if (event.type === "extensionError") {
+    byId("error-text").textContent = event.message;
+    byId("error-banner").hidden = false;
+  } else if (event.type === "extensions") {
+    byId("list").replaceChildren(...event.extensions.map(extensionCard));
+    byId("empty").hidden = event.extensions.length > 0;
+    byId("restart-banner").hidden = !event.restartNeeded;
+  }
+}
+
+function setupExtensions() {
+  byId("add-folder").addEventListener("click", () => send({ type: "chooseExtension", source: "folder" }));
+  byId("add-file").addEventListener("click", () => send({ type: "chooseExtension", source: "file" }));
+  byId("restart").addEventListener("click", () => send({ type: "restartBrowser" }));
+  byId("error-dismiss").addEventListener("click", () => {
+    byId("error-banner").hidden = true;
+  });
+  byId("confirm-cancel").addEventListener("click", () => {
+    send({ type: "cancelInstallExtension", token: extensionsState.pendingToken });
+    hideConfirm();
+  });
+  byId("confirm-add").addEventListener("click", () => {
+    send({ type: "confirmInstallExtension", token: extensionsState.pendingToken });
+    hideConfirm();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !byId("confirm").hidden) {
+      byId("confirm-cancel").click();
+    }
+  });
+}
+
 function refresh() {
+  if (page === "extensions") {
+    send({ type: "listExtensions" });
+    return;
+  }
   if (page === "settings") {
     send({ type: "getSettings" });
     return;
@@ -193,7 +398,9 @@ function refresh() {
 }
 
 window.onBrowserEvent = (event) => {
-  if (event.type === "history") {
+  if (event.type === "extensions" || event.type === "extensionToInstall" || event.type === "extensionError") {
+    extensionsEvent(event);
+  } else if (event.type === "history") {
     showList(event.items.map((item) =>
       row(item, "Remove from history", { type: "deleteHistory", url: item.url }, item.lastVisitMs)));
   } else if (event.type === "bookmarks") {
@@ -364,6 +571,8 @@ if (page === "settings") {
     send({ type: "clearSavedDownloads" });
     refresh();
   });
+} else if (page === "extensions") {
+  setupExtensions();
 } else {
   byId("search").addEventListener("input", refresh);
 }

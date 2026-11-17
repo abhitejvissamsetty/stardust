@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
+    <title>Extensions</title>
+    <style>
+      /*TOKENS*/
+      /*PAGES*/
+    </style>
+  </head>
+  <body data-page="extensions">
+    <main class="wide">
+      <header class="page-header">
+        <div>
+          <h1>Extensions</h1>
+          <p class="subtitle">Add features to Stardust. Only add extensions from people you trust: they can see and change what you do on the sites you let them use.</p>
+        </div>
+        <div class="header-actions">
+          <button class="quiet-button" id="add-folder">Add from folder…</button>
+          <button class="primary-button" id="add-file">Add from file…</button>
+        </div>
+      </header>
+
+      <section class="banner" id="restart-banner" role="status" hidden>
+        <span>Your changes take effect when Stardust restarts.</span>
+        <button class="primary-button small" id="restart">Restart now</button>
+      </section>
+      <section class="banner error" id="error-banner" role="alert" hidden>
+        <span id="error-text"></span>
+        <button class="quiet-button small" id="error-dismiss">Dismiss</button>
+      </section>
+
+      <section class="confirm" id="confirm" role="dialog" aria-labelledby="confirm-title" hidden>
+        <div class="confirm-head">
+          <img class="ext-icon" id="confirm-icon" alt="" hidden />
+          <div class="ext-icon fallback" id="confirm-fallback" aria-hidden="true"></div>
+          <div>
+            <h2 id="confirm-title"></h2>
+            <p class="hint" id="confirm-version"></p>
+          </div>
+        </div>
+        <p id="confirm-description"></p>
+        <h3>It will be able to:</h3>
+        <ul class="permissions" id="confirm-permissions"></ul>
+        <div class="confirm-actions">
+          <button class="quiet-button" id="confirm-cancel">Cancel</button>
+          <button class="primary-button" id="confirm-add">Add extension</button>
+        </div>
+      </section>
+
+      <ul class="ext-list" id="list"></ul>
+      <section class="empty-state" id="empty" hidden>
+        <div class="empty-art" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M10 3h4v3a2 2 0 1 0 4 0h0v4h-3a2 2 0 1 0 0 4h3v4h-4a2 2 0 1 0-4 0H6v-4a2 2 0 1 0 0-4V7a4 4 0 0 1 4-4z" /></svg>
+        </div>
+        <h2>No extensions yet</h2>
+        <p>Add an extension you've downloaded, as an unpacked folder, a .zip file or a .crx file.</p>
+      </section>
+      <p class="hint note">Extensions that act on the tab you're looking at, such as page tools opened from their button, may not work yet. Content blockers, page changers and extensions with their own pages do.</p>
+    </main>
+    <script>
+      /*SCRIPT*/
+    </script>
+  </body>
+</html>

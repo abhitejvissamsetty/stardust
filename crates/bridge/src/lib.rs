@@ -28,8 +28,8 @@ pub use messages::{BrowserState, UiCommand, UiEvent, WindowAction};
 pub use permissions::{Answer, Decision, Permission, SitePermissions, describe, site_origin};
 pub use session::{SavedWindows, Session, SessionTab};
 pub use settings::{
-    DEFAULT_HOMEPAGE, InternalPage, PageCommand, SearchEngine, Settings, StartupMode, is_web_url,
-    normalize_homepage,
+    DEFAULT_HOMEPAGE, ExtensionSource, InternalPage, PageCommand, SearchEngine, Settings,
+    StartupMode, is_web_url, normalize_homepage,
 };
 pub use shortcuts::{KeyPress, Shortcut, shortcut_for};
 pub use tabs::{Tab, TabId, TabStrip};
