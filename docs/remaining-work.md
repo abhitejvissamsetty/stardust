@@ -144,7 +144,7 @@ Built in [milestone-6.md](milestone-6.md). What's left:
 8. **Command bar:** search bookmarks and history in it, order by recent use, more commands, and a keyboard test of the shortcut. See the milestone.
 9. **Web clipper:** folders and tags, search, saving to a notes folder or Obsidian, clipping an offline copy or a screenshot, frames, and finding the cause of a panel that closed once. See the milestone.
 10. **Screenshots:** copy on Windows and Linux, dragging out a region, moving marks, a shortcut, and the block effect on real text. See the milestone.
-11. **Colour picker:** decide whether to keep `--force-color-profile=srgb` (it changes how everything is drawn on wide-gamut screens), show the font actually drawn, more colour formats, and test on Windows and Linux. See the milestone.
+11. **Colour picker:** `--force-color-profile=srgb` is kept by decision (it changes how everything is drawn on wide-gamut screens, so check video and photos look right); show the font actually drawn, more colour formats, and test on Windows and Linux. See the milestone.
 12. **Vertical tabs:** groups, search, pinned tabs, resizing by dragging, keyboard navigation, and a real-mouse test of drag reordering. See the milestone.
 
 ## How to test on macOS

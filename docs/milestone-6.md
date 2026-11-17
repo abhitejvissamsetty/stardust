@@ -239,7 +239,7 @@ Two tools, from the menu, the command bar and the side panel's new **Colours** t
 ### Accuracy, and a decision for the owner
 
 - Picking from a picture of the page is only as good as the picture. On this Mac, Chromium drew and captured in the screen's own wide-gamut colour space, so `#FF8800` read back as `#F78801` and `#00AA00` as `#32AA00`. That's no use for a colour picker.
-- **Stardust now starts Chromium with `--force-color-profile=srgb`**, which makes it draw in sRGB, the space page colours are written in. With it, all three test colours came back exactly (`#FF8800`, `#00AA00`, `#112233`). The cost: it applies to everything, so wide-gamut (Display P3) colours in pages and video are shown as sRGB. For most sites nothing changes, but it's a change to how everything is drawn. It's one switch in `crates/cef-host/src/app.rs` and is skipped if the switch is already given on the command line. Decide whether to keep it.
+- **Stardust now starts Chromium with `--force-color-profile=srgb`**, which makes it draw in sRGB, the space page colours are written in. With it, all three test colours came back exactly (`#FF8800`, `#00AA00`, `#112233`). The cost: it applies to everything, so wide-gamut (Display P3) colours in pages and video are shown as sRGB. For most sites nothing changes, but it's a change to how everything is drawn. It's one switch in `crates/cef-host/src/app.rs` and is skipped if the switch is already given on the command line. **The owner decided to keep it (2026-11-17).**
 - The font card shows the font the page *asked for* (the first in its list), not the one actually drawn when the first isn't installed. Finding the drawn one needs the DevTools `CSS.getPlatformFontsForNode`, which isn't used yet.
 
 ### How it works
