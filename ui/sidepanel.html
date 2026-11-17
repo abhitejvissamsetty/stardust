@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
+    <title>Side panel</title>
+    <style>
+      /*TOKENS*/
+      * { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; overflow: hidden; }
+      body {
+        background: var(--surface);
+        border-left: 1px solid var(--divider);
+        color: var(--text);
+        display: flex;
+        flex-direction: column;
+        font: var(--text-sm) var(--font-ui);
+      }
+      button, input, textarea { font: inherit; }
+      svg { fill: none; flex: none; height: 16px; stroke: currentcolor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.75; width: 16px; }
+      header { align-items: center; border-bottom: 1px solid var(--divider); display: flex; gap: var(--space-1); padding: var(--space-2); }
+      .tabs { display: flex; flex: 1; gap: var(--space-1); }
+      .tab {
+        background: transparent; border: 0; border-radius: 6px; color: var(--text-muted);
+        cursor: default; height: 30px; padding: 0 var(--space-3);
+      }
+      .tab:hover { background: var(--hover); color: var(--text); }
+      .tab[aria-selected="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+      .icon {
+        align-items: center; background: transparent; border: 0; border-radius: 6px; color: var(--text-muted);
+        cursor: default; display: flex; flex: none; height: 28px; justify-content: center; padding: 0; width: 28px;
+      }
+      .icon:hover { background: var(--hover); color: var(--text); }
+      section { display: flex; flex: 1; flex-direction: column; gap: var(--space-2); min-height: 0; padding: var(--space-3); }
+      section[hidden] { display: none; }
+      .status { color: var(--text-muted); font-size: 12px; min-height: 16px; }
+      textarea, input[type="text"] {
+        background: var(--field); border: 1px solid transparent; border-radius: 6px; color: var(--text);
+        outline: none; padding: 8px 10px; width: 100%;
+      }
+      textarea:focus, input[type="text"]:focus { background: var(--field-focus); border-color: var(--accent); }
+      #notes { flex: 1; line-height: 1.45; resize: none; }
+      .row { align-items: center; display: flex; gap: var(--space-2); }
+      .primary, .quiet {
+        border: 0; border-radius: 6px; cursor: default; flex: none; height: 30px; padding: 0 var(--space-3);
+      }
+      .primary { background: var(--accent); color: var(--on-accent); }
+      .quiet { background: var(--field); color: var(--text); }
+      .quiet:hover { background: var(--press); }
+      .list { flex: 1; overflow-y: auto; }
+      .item { align-items: center; border-radius: 6px; display: flex; gap: var(--space-2); min-height: 34px; padding: 4px var(--space-2); }
+      .item:hover { background: var(--hover); }
+      .item .text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+      .item.done .text { color: var(--text-muted); text-decoration: line-through; }
+      .item .actions { display: flex; gap: 2px; }
+      .snippet { align-items: flex-start; flex-direction: column; gap: 2px; }
+      .snippet .head { align-items: center; display: flex; gap: var(--space-2); width: 100%; }
+      .snippet .title { flex: 1; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .snippet .body { color: var(--text-muted); max-height: 3.6em; overflow: hidden; overflow-wrap: anywhere; white-space: pre-wrap; width: 100%; }
+      .empty { color: var(--text-muted); padding: var(--space-3) var(--space-2); }
+      input[type="checkbox"] { accent-color: var(--accent); flex: none; height: 16px; margin: 0; width: 16px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="tabs" role="tablist" aria-label="Side panel">
+        <button class="tab" role="tab" data-tab="notes" aria-selected="true">Notes</button>
+        <button class="tab" role="tab" data-tab="todos" aria-selected="false">To-do</button>
+        <button class="tab" role="tab" data-tab="snippets" aria-selected="false">Snippets</button>
+      </div>
+      <button class="icon" id="close" title="Close the side panel" aria-label="Close the side panel">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17" /></svg>
+      </button>
+    </header>
+
+    <section id="notes-section" role="tabpanel">
+      <textarea id="notes" placeholder="Jot down ideas, scripts, links…" aria-label="Notes" spellcheck="true"></textarea>
+      <div class="status" id="notes-status" role="status"></div>
+    </section>
+
+    <section id="todos-section" role="tabpanel" hidden>
+      <form class="row" id="todo-form">
+        <input id="todo-input" type="text" placeholder="Add a to-do" aria-label="Add a to-do" maxlength="300" autocomplete="off" />
+        <button class="primary" type="submit">Add</button>
+      </form>
+      <div class="list" id="todo-list"></div>
+      <div class="row"><span class="status" id="todo-status" style="flex:1"></span><button class="quiet" id="clear-done" type="button">Clear done</button></div>
+    </section>
+
+    <section id="snippets-section" role="tabpanel" hidden>
+      <button class="quiet" id="add-page" type="button">Save this page's link</button>
+      <form id="snippet-form" style="display:flex;flex-direction:column;gap:6px">
+        <input id="snippet-title" type="text" placeholder="Title (optional)" aria-label="Snippet title" maxlength="80" autocomplete="off" />
+        <textarea id="snippet-text" rows="3" placeholder="Text to keep, like a sign-off or a link" aria-label="Snippet text"></textarea>
+        <button class="primary" type="submit" style="align-self:flex-end">Save snippet</button>
+      </form>
+      <div class="list" id="snippet-list"></div>
+      <div class="status" id="snippet-status" role="status"></div>
+    </section>
+
+    <script>
+      "use strict";
+      const send = (command) => window.browserBridge.send(JSON.stringify(command));
+      const byId = (id) => document.getElementById(id);
+      const make = (tag, className, text) => {
+        const element = document.createElement(tag);
+        if (className) element.className = className;
+        if (text !== undefined) element.textContent = text;
+        return element;
+      };
+
+      let data = { notes: "", todos: [], snippets: [] };
+      let saveTimer = null;
+      let statusTimer = null;
+
+      // Tabs ---------------------------------------------------------------------
+      function showTab(name) {
+        for (const tab of document.querySelectorAll(".tab")) {
+          tab.setAttribute("aria-selected", String(tab.dataset.tab === name));
+        }
+        for (const id of ["notes", "todos", "snippets"]) {
+          byId(`${id}-section`).hidden = id !== name;
+        }
+        try { sessionStorage.setItem("tab", name); } catch (_) {}
+      }
+      for (const tab of document.querySelectorAll(".tab")) {
+        tab.addEventListener("click", () => showTab(tab.dataset.tab));
+      }
+      byId("close").addEventListener("click", () => send({ type: "toggleSidePanel" }));
+
+      function flash(id, text) {
+        const element = byId(id);
+        element.textContent = text;
+        clearTimeout(statusTimer);
+        statusTimer = setTimeout(() => (element.textContent = ""), 1800);
+      }
+
+      // Notes: saved as you type, a moment after you stop.
+      byId("notes").addEventListener("input", () => {
+        byId("notes-status").textContent = "Saving…";
+        clearTimeout(saveTimer);
+        saveTimer = setTimeout(() => {
+          send({ type: "setNotes", text: byId("notes").value });
+          byId("notes-status").textContent = "Saved";
+        }, 500);
+      });
+
+      // To-dos -------------------------------------------------------------------
+      function renderTodos() {
+        const list = byId("todo-list");
+        if (data.todos.length === 0) {
+          list.replaceChildren(make("div", "empty", "Nothing to do. Add what you need to remember."));
+        } else {
+          list.replaceChildren(...data.todos.map((todo) => {
+            const row = make("div", todo.done ? "item done" : "item");
+            const box = make("input");
+            box.type = "checkbox";
+            box.checked = todo.done;
+            box.setAttribute("aria-label", todo.text);
+            box.addEventListener("change", () => send({ type: "toggleTodo", id: todo.id }));
+            const remove = make("button", "icon", "×");
+            remove.title = "Remove";
+            remove.setAttribute("aria-label", "Remove");
+            remove.addEventListener("click", () => send({ type: "removeTodo", id: todo.id }));
+            row.append(box, make("span", "text", todo.text), remove);
+            return row;
+          }));
+        }
+        const done = data.todos.filter((todo) => todo.done).length;
+        byId("todo-status").textContent = data.todos.length ? `${done} of ${data.todos.length} done` : "";
+        byId("clear-done").hidden = done === 0;
+      }
+      byId("todo-form").addEventListener("submit", (event) => {
+        event.preventDefault();
+        const input = byId("todo-input");
+        if (input.value.trim()) {
+          send({ type: "addTodo", text: input.value });
+          input.value = "";
+        }
+      });
+      byId("clear-done").addEventListener("click", () => send({ type: "clearDoneTodos" }));
+
+      // Snippets -----------------------------------------------------------------
+      // The text is copied with a hidden field, since a page of this kind can't use the
+      // clipboard's own API.
+      function copy(text) {
+        const field = make("textarea");
+        field.value = text;
+        field.style.position = "fixed";
+        field.style.opacity = "0";
+        document.body.append(field);
+        field.select();
+        let copied = false;
+        try { copied = document.execCommand("copy"); } catch (_) {}
+        field.remove();
+        flash("snippet-status", copied ? "Copied" : "Couldn't copy");
+      }
+      function renderSnippets() {
+        const list = byId("snippet-list");
+        if (data.snippets.length === 0) {
+          list.replaceChildren(make("div", "empty", "No snippets yet. Keep sign-offs, links and replies you use often."));
+          return;
+        }
+        list.replaceChildren(...data.snippets.map((snippet) => {
+          const row = make("div", "item snippet");
+          const head = make("div", "head");
+          const copyButton = make("button", "quiet", "Copy");
+          copyButton.addEventListener("click", () => copy(snippet.text));
+          const remove = make("button", "icon", "×");
+          remove.title = "Remove";
+          remove.setAttribute("aria-label", "Remove");
+          remove.addEventListener("click", () => send({ type: "removeSnippet", id: snippet.id }));
+          head.append(make("span", "title", snippet.title), copyButton, remove);
+          row.append(head, make("div", "body", snippet.text));
+          return row;
+        }));
+      }
+      byId("snippet-form").addEventListener("submit", (event) => {
+        event.preventDefault();
+        const text = byId("snippet-text");
+        if (text.value.trim()) {
+          send({ type: "addSnippet", title: byId("snippet-title").value, text: text.value });
+          byId("snippet-title").value = "";
+          text.value = "";
+        }
+      });
+      byId("add-page").addEventListener("click", () => {
+        send({ type: "addCurrentPageSnippet" });
+        flash("snippet-status", "Saved if this is a web page");
+      });
+
+      // What the browser sends: the notes, to-dos and snippets, for every window to share.
+      window.onBrowserEvent = (event) => {
+        if (event.type !== "panelData") {
+          return;
+        }
+        data = event.data;
+        const notes = byId("notes");
+        // Don't move the caret under someone typing here.
+        if (document.activeElement !== notes && notes.value !== data.notes) {
+          notes.value = data.notes;
+        }
+        renderTodos();
+        renderSnippets();
+      };
+
+      try { showTab(sessionStorage.getItem("tab") || "notes"); } catch (_) { showTab("notes"); }
+      send({ type: "sidePanelReady" });
+    </script>
+  </body>
+</html>

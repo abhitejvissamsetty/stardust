@@ -11,7 +11,7 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use bridge::{
     Answer, DISCARD_CHECK_MS, DISCARD_IDLE_MS, DISCARD_LOADED_LIMIT, Decision, Download,
     DownloadList, DownloadState, ExtensionSource, InternalPage, KeyPress, LoadedTab, PageCommand,
-    Permission, SavedWindows, SearchEngine, Session, SessionTab, Settings, Shortcut,
+    Permission, SavedWindows, SearchEngine, Session, SessionTab, Settings, Shortcut, SidePanelData,
     SitePermissions, StartupMode, SubmittedLogin, TabHistory, TabId, TabStrip, UiCommand, UiEvent,
     WindowAction, Workspaces, describe, error_page, is_risky_file, is_web_url, level_for_percent,
     login_origin, next_zoom_percent, normalize_homepage, percent_for_level, resolve_input,
@@ -27,7 +27,10 @@ use crate::{
     app::{open_window, open_window_in},
     data_dir, passwords,
     render::{FILL_LOGIN_MESSAGE, LOGIN_SUBMITTED_MESSAGE, UI_COMMAND_MESSAGE},
-    ui::{MENU_FRAME_NAME, internal_page_for_url, internal_url, sidebar_url, toolbar_url},
+    ui::{
+        MENU_FRAME_NAME, internal_page_for_url, internal_url, side_panel_url, sidebar_url,
+        toolbar_url,
+    },
 };
 
 const ERR_ABORTED: i32 = -3;
@@ -46,6 +49,7 @@ const TOOLBAR_HEIGHT: i32 = 88;
 const TAB_ROW_HEIGHT: i32 = 40;
 const SIDEBAR_WIDTH: i32 = 264;
 const SIDEBAR_COLLAPSED_WIDTH: i32 = 56;
+const SIDE_PANEL_WIDTH: i32 = 320;
 const DOWNLOAD_BAR_HEIGHT: i32 = 44;
 const FIND_BAR_HEIGHT: i32 = 44;
 const BOOKMARKS_BAR_HEIGHT: i32 = 34;
@@ -62,6 +66,7 @@ const CLEAR_ORIGIN_LIMIT: u32 = 2000;
 const SETTING_SITE_PERMISSIONS: &str = "site_permissions";
 const SETTING_EXTENSIONS: &str = "extensions";
 const SETTING_WORKSPACES: &str = "workspaces";
+const SETTING_SIDE_PANEL: &str = "side_panel";
 /// Each workspace's open tabs are saved under this, then its id.
 const WORKSPACE_TABS_PREFIX: &str = "workspace_tabs_";
 /// Extensions waiting for the person to agree to them. More than this drops the oldest.
@@ -155,6 +160,10 @@ pub struct Shell {
     sidebar: Option<Browser>,
     sidebar_view: Option<BrowserView>,
     sidebar_ready: bool,
+    /// The side panel (notes, to-dos, snippets) at the right of the pages, when open.
+    side_panel: Option<Browser>,
+    side_panel_view: Option<BrowserView>,
+    side_panel_ready: bool,
     /// The workspace this window belongs to. Empty is the main one, which uses the
     /// browser's original profile; any other has a profile of its own on disk.
     workspace: String,
@@ -225,6 +234,8 @@ struct SavedData {
     workspaces: Mutex<Workspaces>,
     /// Each workspace's tabs as last saved, to avoid rewriting what didn't change.
     workspace_tabs: Mutex<HashMap<String, String>>,
+    /// The side panel's notes, to-dos and snippets, shared by every window.
+    panel: Mutex<SidePanelData>,
 }
 
 fn saved_data() -> &'static SavedData {
@@ -269,6 +280,9 @@ fn saved_data() -> &'static SavedData {
             .map(|json| Workspaces::parse(&json))
             .unwrap_or_default();
         remove_forgotten_workspace_data(&workspaces);
+        let panel = saved(SETTING_SIDE_PANEL)
+            .map(|json| SidePanelData::parse(&json))
+            .unwrap_or_default();
         SavedData {
             storage: storage.map(Mutex::new),
             settings: Mutex::new(settings),
@@ -277,6 +291,7 @@ fn saved_data() -> &'static SavedData {
             extensions: Mutex::new(extensions),
             workspaces: Mutex::new(workspaces),
             workspace_tabs: Mutex::default(),
+            panel: Mutex::new(panel),
         }
     })
 }
@@ -2189,6 +2204,7 @@ fn run_command(shell: &SharedShell, command: UiCommand) {
             publish_extensions(shell);
             publish_workspaces(shell);
             publish_layout(shell);
+            publish_side_panel_state(shell);
             send_known_favicons(shell);
             // A new window's first tab was shown before its toolbar could take focus.
             let is_blank = lock(shell)
@@ -2299,6 +2315,22 @@ fn run_command(shell: &SharedShell, command: UiCommand) {
         UiCommand::NewPrivateWindow => open_window(None, &[BLANK_PAGE.to_owned()], true),
         UiCommand::OpenWorkspace { id } => open_workspace(&id),
         UiCommand::ToggleSplitView => toggle_split_view(shell),
+        UiCommand::ToggleSidePanel => toggle_side_panel(shell),
+        // Only the side panel sends this, and it's handled where it arrives.
+        UiCommand::SidePanelReady => {}
+        UiCommand::SetNotes { text } => change_panel_data(|data| {
+            data.set_notes(&text);
+            true
+        }),
+        UiCommand::AddTodo { text } => change_panel_data(|data| data.add_todo(&text)),
+        UiCommand::ToggleTodo { id } => change_panel_data(|data| data.toggle_todo(id)),
+        UiCommand::RemoveTodo { id } => change_panel_data(|data| data.remove_todo(id)),
+        UiCommand::ClearDoneTodos => change_panel_data(SidePanelData::clear_done),
+        UiCommand::AddSnippet { title, text } => {
+            change_panel_data(|data| data.add_snippet(&title, &text))
+        }
+        UiCommand::RemoveSnippet { id } => change_panel_data(|data| data.remove_snippet(id)),
+        UiCommand::AddCurrentPageSnippet => add_current_page_snippet(shell),
         // Only the tab list sends this, and it's handled where it arrives.
         UiCommand::SidebarReady => {}
         UiCommand::SetVerticalTabs { enabled } => set_vertical_tabs(enabled),
@@ -2795,6 +2827,7 @@ fn run_shortcut(shell: &SharedShell, event: &KeyEvent) -> bool {
             &workspace_of(shell),
         ),
         Shortcut::NewPrivateWindow => open_window(None, &[BLANK_PAGE.to_owned()], true),
+        Shortcut::ToggleSidePanel => toggle_side_panel(shell),
         Shortcut::ReopenClosedTab => reopen_closed_tab(shell),
         Shortcut::ZoomIn => change_zoom(shell, Some(true)),
         Shortcut::ZoomOut => change_zoom(shell, Some(false)),
@@ -2873,6 +2906,7 @@ pub fn clear_window(shell: &SharedShell) {
     shell.window = None;
     shell.body = None;
     shell.sidebar_view = None;
+    shell.side_panel_view = None;
     shell.layout = None;
     shell.popup_overlay = None;
     shell.popup_view = None;
@@ -4159,27 +4193,30 @@ pub fn load_background_tabs(shell: &SharedShell) {
 
 // -- Split view ------------------------------------------------------------------------
 
-/// Puts the two panes of a split view in order, left before right, whatever order their
-/// views were added to the window in.
+/// Puts the views in the pages box in order: the two panes of a split view, left before
+/// right, and the side panel last, whatever order they were added in.
 fn order_split_panes(shell: &SharedShell) {
-    let (body, left, right) = {
+    let (body, left, right, panel) = {
         let guard = lock(shell);
-        let Some((left, right)) = guard.split else {
-            return;
-        };
+        let pair = guard.split;
+        let view_of = |id: TabId| guard.handles.get(&id).map(|handles| handles.view.clone());
         (
             guard.body.clone(),
-            guard.handles.get(&left).map(|handles| handles.view.clone()),
-            guard
-                .handles
-                .get(&right)
-                .map(|handles| handles.view.clone()),
+            pair.and_then(|(left, _)| view_of(left)),
+            pair.and_then(|(_, right)| view_of(right)),
+            guard.side_panel_view.clone(),
         )
     };
-    if let (Some(body), Some(left), Some(right)) = (body, left, right) {
-        let last = body.child_view_count() as i32 - 1;
+    let Some(body) = body else {
+        return;
+    };
+    let last = body.child_view_count() as i32 - 1;
+    if let (Some(left), Some(right)) = (left, right) {
         body.reorder_child_view(Some(&mut View::from(&left)), last);
         body.reorder_child_view(Some(&mut View::from(&right)), last);
+    }
+    if let Some(panel) = panel {
+        body.reorder_child_view(Some(&mut View::from(&panel)), last);
     }
 }
 
@@ -4203,7 +4240,135 @@ fn toggle_split_view(shell: &SharedShell) {
     attach_tab(shell, id);
 }
 
+// -- The side panel -------------------------------------------------------------------
+
+fn panel_data() -> MutexGuard<'static, SidePanelData> {
+    saved_data()
+        .panel
+        .lock()
+        .expect("Failed to lock the side panel's data")
+}
+
+fn save_panel_data() {
+    let json = panel_data().to_json();
+    with_storage(|storage| storage.set_setting(SETTING_SIDE_PANEL, &json));
+}
+
+fn side_panel_of(shell: &SharedShell) -> Option<Browser> {
+    let guard = lock(shell);
+    guard.side_panel.clone().filter(|_| guard.side_panel_ready)
+}
+
+/// Sends the notes, to-dos and snippets to this window's side panel, if it's open.
+fn publish_panel(shell: &SharedShell) {
+    let Some(panel) = side_panel_of(shell) else {
+        return;
+    };
+    let data = panel_data().clone();
+    send_to_toolbar(Some(&panel), &UiEvent::PanelData { data: &data });
+}
+
+/// Changes are shown in every window's panel, since they all share the same notes.
+fn publish_panel_everywhere() {
+    for shell in open_windows() {
+        publish_panel(&shell);
+    }
+}
+
+/// Tells the toolbar whether its window's panel is open, for the button's state.
+fn publish_side_panel_state(shell: &SharedShell) {
+    let (toolbar, open) = {
+        let guard = lock(shell);
+        (
+            guard.toolbar.clone().filter(|_| guard.toolbar_ready),
+            guard.side_panel_view.is_some(),
+        )
+    };
+    send_to_toolbar(toolbar.as_ref(), &UiEvent::SidePanel { open });
+}
+
+/// Opens the side panel at the right of the pages, or closes it.
+fn toggle_side_panel(shell: &SharedShell) {
+    let (body, view) = {
+        let guard = lock(shell);
+        (guard.body.clone(), guard.side_panel_view.clone())
+    };
+    let Some(body) = body else {
+        return;
+    };
+    hide_extension_popup(shell);
+    if view.is_none() {
+        let mut client = SidebarClient::new(shell.clone(), Dock::Panel);
+        let created = browser_view_create(
+            Some(&mut client),
+            Some(&CefString::from(side_panel_url())),
+            Some(&BrowserSettings::default()),
+            None,
+            None,
+            Some(&mut SidebarViewHost::new(Dock::Panel)),
+        );
+        if let Some(created) = created {
+            body.add_child_view(Some(&mut View::from(&created)));
+            lock(shell).side_panel_view = Some(created);
+        }
+    } else {
+        let (view, browser) = {
+            let mut guard = lock(shell);
+            guard.side_panel_ready = false;
+            (guard.side_panel_view.take(), guard.side_panel.clone())
+        };
+        if let Some(view) = &view {
+            body.remove_child_view(Some(&mut View::from(view)));
+        }
+        // The browser's closing calls back into code that locks, so nothing's held here.
+        if let Some(host) = browser.and_then(|browser| browser.host()) {
+            host.close_browser(1);
+        }
+    }
+    order_split_panes(shell);
+    let window = lock(shell).window.clone();
+    if let Some(window) = window {
+        window.layout();
+    }
+    publish_side_panel_state(shell);
+}
+
+/// Saves the active page's title and address as a snippet.
+fn add_current_page_snippet(shell: &SharedShell) {
+    let page = {
+        let guard = lock(shell);
+        guard
+            .strip
+            .active_id()
+            .and_then(|id| guard.strip.get(id))
+            .filter(|tab| is_web_url(&tab.page.url))
+            .map(|tab| (tab.title.clone(), tab.page.url.clone()))
+    };
+    if let Some((title, url)) = page
+        && panel_data().add_snippet(&title, &url)
+    {
+        save_panel_data();
+        publish_panel_everywhere();
+    }
+}
+
+/// Runs a change to the panel's data, then saves and shows it everywhere if it changed.
+fn change_panel_data(change: impl FnOnce(&mut SidePanelData) -> bool) {
+    if change(&mut panel_data()) {
+        save_panel_data();
+        publish_panel_everywhere();
+    }
+}
+
 // -- The vertical tab list -------------------------------------------------------------
+
+/// Which docked page a client belongs to. Both are small pages of the browser's own that
+/// sit beside the pages, and each is held to the commands it needs.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Dock {
+    Tabs,
+    Panel,
+}
 
 /// The vertical tab list's browser, once its page has loaded and can take events.
 fn sidebar_of(shell: &SharedShell) -> Option<Browser> {
@@ -4249,14 +4414,14 @@ pub fn sync_sidebar(shell: &SharedShell) {
         return;
     };
     if vertical && !has_view {
-        let mut client = SidebarClient::new(shell.clone());
+        let mut client = SidebarClient::new(shell.clone(), Dock::Tabs);
         let view = browser_view_create(
             Some(&mut client),
             Some(&CefString::from(sidebar_url())),
             Some(&BrowserSettings::default()),
             None,
             None,
-            Some(&mut SidebarViewHost::new()),
+            Some(&mut SidebarViewHost::new(Dock::Tabs)),
         );
         if let Some(view) = view {
             // First in the box, so the pages take the rest of the width.
@@ -4346,12 +4511,18 @@ fn set_sidebar_collapsed(collapsed: bool) {
 }
 
 wrap_browser_view_delegate! {
-    struct SidebarViewHost {}
+    struct SidebarViewHost {
+        dock: Dock,
+    }
 
     impl ViewDelegate {
-        // Only the width matters: the box stretches the list to the window's height.
+        // Only the width matters: the box stretches the view to the window's height.
         fn preferred_size(&self, _view: Option<&mut View>) -> Size {
-            Size { width: sidebar_width(), height: 100 }
+            let width = match self.dock {
+                Dock::Tabs => sidebar_width(),
+                Dock::Panel => SIDE_PANEL_WIDTH,
+            };
+            Size { width, height: 100 }
         }
     }
 
@@ -4367,11 +4538,12 @@ wrap_browser_view_delegate! {
 wrap_client! {
     pub struct SidebarClient {
         shell: SharedShell,
+        dock: Dock,
     }
 
     impl Client {
         fn life_span_handler(&self) -> Option<LifeSpanHandler> {
-            Some(SidebarLifeSpan::new(self.shell.clone()))
+            Some(SidebarLifeSpan::new(self.shell.clone(), self.dock))
         }
 
         fn keyboard_handler(&self) -> Option<KeyboardHandler> {
@@ -4379,7 +4551,7 @@ wrap_client! {
         }
 
         fn request_handler(&self) -> Option<RequestHandler> {
-            Some(SidebarRequests::new())
+            Some(SidebarRequests::new(self.dock))
         }
 
         fn on_process_message_received(
@@ -4399,15 +4571,24 @@ wrap_client! {
                 .argument_list()
                 .map(|list| CefString::from(&list.string(0)).to_string())
                 .unwrap_or_default();
-            match serde_json::from_str::<UiCommand>(&json) {
-                Ok(UiCommand::SidebarReady) => {
+            match (self.dock, serde_json::from_str::<UiCommand>(&json)) {
+                (Dock::Tabs, Ok(UiCommand::SidebarReady)) => {
                     lock(&self.shell).sidebar_ready = true;
                     publish(&self.shell);
                     publish_layout(&self.shell);
                     publish_workspaces(&self.shell);
                     send_known_favicons(&self.shell);
                 }
-                Ok(command) if command.allowed_from_sidebar() => run_command(&self.shell, command),
+                (Dock::Panel, Ok(UiCommand::SidePanelReady)) => {
+                    lock(&self.shell).side_panel_ready = true;
+                    publish_panel(&self.shell);
+                }
+                (Dock::Tabs, Ok(command)) if command.allowed_from_sidebar() => {
+                    run_command(&self.shell, command)
+                }
+                (Dock::Panel, Ok(command)) if command.allowed_from_side_panel() => {
+                    run_command(&self.shell, command)
+                }
                 _ => {}
             }
             1
@@ -4418,12 +4599,16 @@ wrap_client! {
 wrap_life_span_handler! {
     struct SidebarLifeSpan {
         shell: SharedShell,
+        dock: Dock,
     }
 
     impl LifeSpanHandler {
         fn on_after_created(&self, browser: Option<&mut Browser>) {
             let mut shell = lock(&self.shell);
-            shell.sidebar = browser.cloned();
+            match self.dock {
+                Dock::Tabs => shell.sidebar = browser.cloned(),
+                Dock::Panel => shell.side_panel = browser.cloned(),
+            }
             shell.open_browsers += 1;
         }
 
@@ -4455,8 +4640,16 @@ wrap_life_span_handler! {
                 if shell.window_closing {
                     return 0;
                 }
-                shell.sidebar_ready = false;
-                shell.sidebar_view.take()
+                match self.dock {
+                    Dock::Tabs => {
+                        shell.sidebar_ready = false;
+                        shell.sidebar_view.take()
+                    }
+                    Dock::Panel => {
+                        shell.side_panel_ready = false;
+                        shell.side_panel_view.take()
+                    }
+                }
             };
             drop(view);
             1
@@ -4465,8 +4658,16 @@ wrap_life_span_handler! {
         fn on_before_close(&self, _browser: Option<&mut Browser>) {
             {
                 let mut shell = lock(&self.shell);
-                shell.sidebar = None;
-                shell.sidebar_ready = false;
+                match self.dock {
+                    Dock::Tabs => {
+                        shell.sidebar = None;
+                        shell.sidebar_ready = false;
+                    }
+                    Dock::Panel => {
+                        shell.side_panel = None;
+                        shell.side_panel_ready = false;
+                    }
+                }
             }
             browser_closed(&self.shell, Some(TabId::MAX), None);
         }
@@ -4474,7 +4675,9 @@ wrap_life_span_handler! {
 }
 
 wrap_request_handler! {
-    struct SidebarRequests {}
+    struct SidebarRequests {
+        dock: Dock,
+    }
 
     impl RequestHandler {
         // The tab list only ever shows its own page, because the browser acts on what
@@ -4488,7 +4691,11 @@ wrap_request_handler! {
             _is_redirect: i32,
         ) -> i32 {
             let url = request.map(|request| CefString::from(&request.url()).to_string());
-            (url.as_deref() != Some(sidebar_url())).into()
+            let own = match self.dock {
+                Dock::Tabs => sidebar_url(),
+                Dock::Panel => side_panel_url(),
+            };
+            (url.as_deref() != Some(own)).into()
         }
     }
 }

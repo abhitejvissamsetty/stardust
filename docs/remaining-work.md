@@ -140,7 +140,8 @@ Built in [milestone-6.md](milestone-6.md). What's left:
 4. Memory cost of many workspaces open at once, and the untested cases listed in the milestone.
 5. Icons for Windows (`.ico`) and Linux.
 6. **Split view:** test clicking a pane to focus it, a draggable divider, splitting an existing tab, saving the split across restarts, a shortcut key. See the milestone.
-7. **Vertical tabs:** groups, search, pinned tabs, resizing by dragging, keyboard navigation, and a real-mouse test of drag reordering. See the milestone.
+7. **Side panel:** per-workspace notes (a decision), keeping it open between runs, resizing, inserting snippets into pages, search and export, and private windows sharing the notes. See the milestone.
+8. **Vertical tabs:** groups, search, pinned tabs, resizing by dragging, keyboard navigation, and a real-mouse test of drag reordering. See the milestone.
 
 ## How to test on macOS
 

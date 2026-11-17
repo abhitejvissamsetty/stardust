@@ -555,6 +555,9 @@ window.onBrowserEvent = (event) => {
     if (menuState.owner === "extensions") {
       openExtensionsMenu();
     }
+  } else if (event.type === "sidePanel") {
+    sidePanelOpen = event.open;
+    byId("side-panel-button").setAttribute("aria-pressed", String(event.open));
   } else if (event.type === "layout") {
     tabLayout = { vertical: event.vertical, collapsed: event.collapsed };
     document.documentElement.toggleAttribute("data-vertical-tabs", event.vertical);
@@ -638,6 +641,10 @@ byId("close-anyway").addEventListener("click", () => {
 byId("menu-button").addEventListener("click", () => toggleMenu("menu", openAppMenu));
 byId("extensions-button").addEventListener("click", () => toggleMenu("extensions", openExtensionsMenu));
 byId("workspace-button").addEventListener("click", () => toggleMenu("workspaces", openWorkspaceMenu));
+byId("side-panel-button").addEventListener("click", () => {
+  hideMenu();
+  send({ type: "toggleSidePanel" });
+});
 byId("zoom-chip").addEventListener("click", () => send({ type: "zoomReset" }));
 byId("clear-downloads").addEventListener("click", () => send({ type: "clearDownloads" }));
 byId("new-tab").addEventListener("click", () => send({ type: "newTab" }));
@@ -741,6 +748,7 @@ const MENU_WIDTH = 300;
 let extensionsState = { items: [], available: true };
 let workspacesState = { items: [], current: "" };
 let tabLayout = { vertical: false, collapsed: false };
+let sidePanelOpen = false;
 
 function toggleMenu(owner, open) {
   if (menuState.owner === owner) {
@@ -781,6 +789,7 @@ function openAppMenu() {
     { label: "Downloads", shortcut: shortcut("J"), command: page("downloads") },
     { label: "Bookmarks", shortcut: shortcut("O", { shift: true }), command: page("bookmarks") },
     { label: "Extensions", command: page("extensions") },
+    { label: sidePanelOpen ? "Close the side panel" : "Side panel: notes, to-dos, snippets", shortcut: shortcut("E", { shift: true }), command: { type: "toggleSidePanel" } },
     { label: splitIds.length ? "Close split view" : "Split view: two pages side by side", command: { type: "toggleSplitView" } },
     { label: tabLayout.vertical ? "Show tabs across the top" : "Show tabs down the side", command: { type: "setVerticalTabs", enabled: !tabLayout.vertical } },
     { kind: "separator" },

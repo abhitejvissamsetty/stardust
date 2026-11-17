@@ -1,4 +1,4 @@
-# Milestone 6: workspaces, vertical tabs, split view and the new icon
+# Milestone 6: workspaces, vertical tabs, split view, side panel and the new icon
 
 Built and tested on macOS (Apple Silicon) on 2026-11-17. This is the first piece of Phase 1 of [creator-roadmap.md](creator-roadmap.md). Tested by driving the browser through Chromium's debugging protocol with real clicks, and by screenshots of Stardust's own pages. The native window frame wasn't looked at.
 
@@ -14,6 +14,7 @@ Built and tested on macOS (Apple Silicon) on 2026-11-17. This is the first piece
 | Settings → Workspaces (create, rename, colour, delete) | **Done**, tested |
 | Vertical tabs: a tab list down the left, collapsible to icons | **Done** and tested |
 | Split view: two pages side by side | **Done** and tested, but not by clicking a pane |
+| Side panel: notes, to-do list and snippets | **Done** and tested |
 | Icon for Windows and Linux | **Not done**, see below |
 
 ## The icon
@@ -103,6 +104,37 @@ Opening, navigating the right pane, switching the active pane from the strip, re
 - **A top and bottom split**, and more than two panes.
 - **The split isn't saved:** after a restart, the two tabs come back as ordinary tabs.
 - **A shortcut key.** It's in the menu only.
+- Windows and Linux.
+
+## Side panel
+
+A panel at the right of the pages, opened from the toolbar's panel button, the menu, or Cmd/Ctrl+Shift+E. It's per window, 320 px wide, and works with vertical tabs and split view (264 + 345 + 345 + 320 + gaps = 1280 in a test with all three on).
+
+- **Notes:** one page of text, saved as you type a moment after you stop (up to 100,000 characters).
+- **To-do:** add, tick, remove, and "Clear done". The newest is at the top. Up to 200, 300 characters each.
+- **Snippets:** text you reuse, such as a sign-off, with an optional title. **Copy** puts it on the clipboard. "Save this page's link" keeps the active page's title and address as a snippet. Up to 100, 5,000 characters each.
+- **Shared:** everything is shared by every window and workspace, and a change in one window's panel shows in the others at once. It's saved with the browser's other settings, so it comes back after a restart.
+- **Private windows** can open the panel too, but it shows and edits the same shared notes, so nothing written there is private. See the limits.
+
+### How it works
+
+- The panel is a third small browser view of the browser's own (`ui/sidepanel.html`), docked at the right end of the pages box and always kept last. It loads only its own page, opens no windows, and, like the tab list, is held to its own set of commands (`allowed_from_side_panel`, with a test). The tab list and the panel now share one client, told apart by which of the two it is for.
+- Data is validated whenever it's read or changed: limits on counts and lengths, control characters turned to spaces, and ids that are never reused (`crates/bridge/src/sidepanel.rs`, with tests).
+- The page is a `data:` page, which can't use the clipboard's own API, so Copy uses a hidden field and the old copy command.
+
+### Tested
+
+With real mouse and keyboard events: typing notes, adding and ticking to-dos, saving a snippet, and Copy (the clipboard held the snippet). Sharing between two windows, saving across a restart, closing the panel from its own button, and the page returning to full width. Page widths in the three-way layout. The page was checked by screenshot.
+
+### Not tested or not built
+
+- **A shortcut checked on the keyboard:** it's unit-tested only.
+- **A panel kept open between runs:** it always starts closed.
+- **Resizing the panel** by dragging.
+- **Notes or to-dos per workspace.** They're global, so a workspace for a client shows the same notes. Splitting them is a decision for the owner.
+- **Private windows** share the same data (above).
+- **Inserting a snippet into a page,** or saving a selection from a page. Only Copy and the page's link are there.
+- **Search or tags** in the panel, and export. The data is plain JSON in the settings table.
 - Windows and Linux.
 
 ## Tests

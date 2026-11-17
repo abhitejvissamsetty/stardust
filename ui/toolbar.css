@@ -714,3 +714,5 @@ svg {
   position: absolute;
   right: 14px;
 }
+
+#side-panel-button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }

@@ -35,6 +35,7 @@ pub enum Shortcut {
     Bookmarks,
     Settings,
     Downloads,
+    ToggleSidePanel,
 }
 
 /// A key press, using Windows virtual key codes as CEF reports them on every platform.
@@ -56,6 +57,7 @@ const T: i32 = 0x54;
 const LEFT: i32 = 0x25;
 const RIGHT: i32 = 0x27;
 const D: i32 = 0x44;
+const E: i32 = 0x45;
 const F: i32 = 0x46;
 const G: i32 = 0x47;
 const H: i32 = 0x48;
@@ -138,6 +140,7 @@ pub fn shortcut_for(key: KeyPress, is_mac: bool) -> Option<Shortcut> {
         (KEY_0, true, false, false) => Some(Shortcut::ZoomReset),
         (P, true, false, false) => Some(Shortcut::Print),
         (N, true, true, false) => Some(Shortcut::NewPrivateWindow),
+        (E, true, true, false) => Some(Shortcut::ToggleSidePanel),
         (T, true, true, false) => Some(Shortcut::ReopenClosedTab),
         // Chrome on macOS: Cmd+M minimizes, and Ctrl+Cmd+F toggles full screen.
         (M, true, false, false) if is_mac => Some(Shortcut::Minimize),
@@ -195,6 +198,16 @@ mod tests {
             shortcut_for(cmd(N, true, false), true),
             Some(Shortcut::NewPrivateWindow)
         );
+        assert_eq!(
+            shortcut_for(cmd(E, true, false), true),
+            Some(Shortcut::ToggleSidePanel)
+        );
+        assert_eq!(
+            shortcut_for(ctrl(E, true), false),
+            Some(Shortcut::ToggleSidePanel)
+        );
+        // Without Shift, the key isn't taken.
+        assert_eq!(shortcut_for(cmd(E, false, false), true), None);
         assert_eq!(
             shortcut_for(cmd(T, true, false), true),
             Some(Shortcut::ReopenClosedTab)

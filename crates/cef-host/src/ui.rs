@@ -15,6 +15,7 @@ const BOOKMARKS: &str = include_str!("../../../ui/bookmarks.html");
 const SETTINGS: &str = include_str!("../../../ui/settings.html");
 const DOWNLOADS: &str = include_str!("../../../ui/downloads.html");
 const EXTENSIONS: &str = include_str!("../../../ui/extensions.html");
+const SIDE_PANEL: &str = include_str!("../../../ui/sidepanel.html");
 const SIDEBAR: &str = include_str!("../../../ui/sidebar.html");
 const POPUP: &str = include_str!("../../../ui/popup.html");
 const POPUP_JS: &str = include_str!("../../../ui/popup.js");
@@ -43,6 +44,12 @@ fn build_toolbar_url() -> String {
             .replace("/*TOOLBAR*/", TOOLBAR)
             .replace("/*APP*/", &APP.replace("/*MENU*/\"\"", &menu)),
     )
+}
+
+/// The side panel's page.
+pub fn side_panel_url() -> &'static str {
+    static URL: OnceLock<String> = OnceLock::new();
+    URL.get_or_init(|| data_url(&SIDE_PANEL.replace("/*TOKENS*/", TOKENS)))
 }
 
 /// The vertical tab list's page.

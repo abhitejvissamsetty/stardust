@@ -103,6 +103,32 @@ pub enum UiCommand {
     },
     /// Shows a second tab beside this one, or goes back to one page.
     ToggleSplitView,
+    /// Opens the side panel beside the page, or closes it.
+    ToggleSidePanel,
+    /// The side panel's page has loaded and can be sent what it shows.
+    SidePanelReady,
+    SetNotes {
+        text: String,
+    },
+    AddTodo {
+        text: String,
+    },
+    ToggleTodo {
+        id: u32,
+    },
+    RemoveTodo {
+        id: u32,
+    },
+    ClearDoneTodos,
+    AddSnippet {
+        title: String,
+        text: String,
+    },
+    RemoveSnippet {
+        id: u32,
+    },
+    /// Saves the active page's title and address as a snippet.
+    AddCurrentPageSnippet,
     NewWindow,
     NewPrivateWindow,
     /// Shows a workspace's window, or opens it with the tabs it had.
@@ -161,6 +187,25 @@ impl UiCommand {
     }
 }
 
+impl UiCommand {
+    /// What the side panel's page may ask for: its own data, and closing itself.
+    pub fn allowed_from_side_panel(&self) -> bool {
+        matches!(
+            self,
+            Self::SidePanelReady
+                | Self::ToggleSidePanel
+                | Self::SetNotes { .. }
+                | Self::AddTodo { .. }
+                | Self::ToggleTodo { .. }
+                | Self::RemoveTodo { .. }
+                | Self::ClearDoneTodos
+                | Self::AddSnippet { .. }
+                | Self::RemoveSnippet { .. }
+                | Self::AddCurrentPageSnippet
+        )
+    }
+}
+
 /// What the person asked of the window, as Chrome's title bar and menus do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -197,6 +242,14 @@ pub enum UiEvent<'a> {
         items: &'a [serde_json::Value],
         /// Private windows don't run extensions.
         available: bool,
+    },
+    /// The notes, to-dos and snippets, for the side panel.
+    PanelData {
+        data: &'a crate::SidePanelData,
+    },
+    /// Whether this window's side panel is showing, for the toolbar's button.
+    SidePanel {
+        open: bool,
     },
     /// Where the tabs are shown, for the toolbar and the vertical tab list.
     Layout {
@@ -303,6 +356,26 @@ mod tests {
             r#"{"type":"openDownload","id":0,"confirmed":true}"#
         ));
         assert!(!allowed(r#"{"type":"openPage","page":"settings"}"#));
+        assert!(!allowed(r#"{"type":"quit"}"#));
+        assert!(!allowed(r#"{"type":"ready"}"#));
+    }
+
+    #[test]
+    fn the_side_panel_may_only_ask_for_its_own_things() {
+        let allowed = |json: &str| {
+            serde_json::from_str::<UiCommand>(json)
+                .unwrap()
+                .allowed_from_side_panel()
+        };
+        assert!(allowed(r#"{"type":"setNotes","text":"hi"}"#));
+        assert!(allowed(r#"{"type":"addTodo","text":"x"}"#));
+        assert!(allowed(r#"{"type":"toggleSidePanel"}"#));
+        assert!(allowed(r#"{"type":"addCurrentPageSnippet"}"#));
+        assert!(!allowed(r#"{"type":"navigate","input":"example.com"}"#));
+        assert!(!allowed(r#"{"type":"closeTab","id":1}"#));
+        assert!(!allowed(
+            r#"{"type":"openDownload","id":0,"confirmed":true}"#
+        ));
         assert!(!allowed(r#"{"type":"quit"}"#));
         assert!(!allowed(r#"{"type":"ready"}"#));
     }
