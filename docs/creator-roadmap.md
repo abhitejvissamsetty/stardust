@@ -65,7 +65,7 @@ Writers, designers, streamers and social managers share most of the workspace fe
 |---|---|---|---|
 | Workspaces: a named set of tabs, with its own profile, switchable in one click | The core idea: one workspace per channel or project | L | **First version built, see [milestone-6.md](milestone-6.md).** Logins are separate; extensions run in Personal only |
 | Vertical tab sidebar, with groups and search | Dozens of tabs per project | M | **Sidebar built, see [milestone-6.md](milestone-6.md).** Groups and search aren't |
-| Split view: two pages side by side | Research next to a script or a dashboard | M | Window layout |
+| Split view: two pages side by side | Research next to a script or a dashboard | M | **First version built, see [milestone-6.md](milestone-6.md).** Resizable divider, splitting an existing tab and saving it aren't |
 | Side panel: notes, a to-do list and a clipboard of snippets, beside any page | Work without leaving the page | M | Window layout |
 | Command bar (a quick switcher for tabs, workspaces and tools) | Speed | M | Menus |
 | Saved sessions, and reopening a workspace as it was | Resume a project | S | Workspaces |

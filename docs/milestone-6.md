@@ -1,4 +1,4 @@
-# Milestone 6: workspaces, vertical tabs and the new icon
+# Milestone 6: workspaces, vertical tabs, split view and the new icon
 
 Built and tested on macOS (Apple Silicon) on 2026-11-17. This is the first piece of Phase 1 of [creator-roadmap.md](creator-roadmap.md). Tested by driving the browser through Chromium's debugging protocol with real clicks, and by screenshots of Stardust's own pages. The native window frame wasn't looked at.
 
@@ -13,6 +13,7 @@ Built and tested on macOS (Apple Silicon) on 2026-11-17. This is the first piece
 | Workspace button and switcher in the toolbar | **Done**, checked by screenshot |
 | Settings → Workspaces (create, rename, colour, delete) | **Done**, tested |
 | Vertical tabs: a tab list down the left, collapsible to icons | **Done** and tested |
+| Split view: two pages side by side | **Done** and tested, but not by clicking a pane |
 | Icon for Windows and Linux | **Not done**, see below |
 
 ## The icon
@@ -77,6 +78,31 @@ Page width equals the window minus the list (1016 + 264 = 1280, and 1224 with it
 - **A window that's hidden behind another** keeps a stale toolbar height until it's shown, because Chromium doesn't resize hidden pages. Seen in tests, and right once shown.
 - Resizing the list by dragging its edge. The width is one of two sizes.
 - Keyboard use of the list (it has roles, but Tab/arrow navigation isn't designed).
+- Windows and Linux.
+
+## Split view
+
+Menu → "Split view: two pages side by side" opens a new tab beside the current one, so two pages show at once, each half the width, with a thin line between. The same menu item reads "Close split view" and goes back to one page.
+
+- **The active pane** is the one the toolbar is about: its address, back and forward, find, zoom and reload. Clicking the other pane makes it active. Picking it in the tab strip or the vertical list does the same.
+- **Picking another tab** from the strip or list replaces the pane that was in use, and leaves the other pane alone.
+- **Marks:** the two tabs in the split are underlined in the accent colour in the tab row, and have a small square in the vertical list.
+- **Closing a pane's tab** ends the split and keeps the other page.
+- **Unloading:** the two tabs are never unloaded to save memory.
+- **Layout:** the pages box holds both views and the left one is always put first. It works with vertical tabs (each pane 507 px of a 1280 px window with the list open), and in private windows and workspaces.
+
+### Tested
+
+Opening, navigating the right pane, switching the active pane from the strip, replacing a pane with a third tab, closing a pane, closing the split, and the same with vertical tabs on. Page widths were measured (639 + 2 + 639 = 1280) and the real window was looked at in a screenshot of the screen, which showed the two pages in the right order.
+
+### Not tested or not built
+
+- **Clicking a pane to make it active.** The code uses CEF's focus callback, but a real click couldn't be sent from here (no accessibility permission for scripted clicks), and test clicks through the debugging protocol don't move native focus.
+- **Dragging the divider** to resize the panes: always half and half.
+- **Splitting with an existing tab:** the split always opens a new tab. Moving an open tab into a pane isn't built.
+- **A top and bottom split**, and more than two panes.
+- **The split isn't saved:** after a restart, the two tabs come back as ordinary tabs.
+- **A shortcut key.** It's in the menu only.
 - Windows and Linux.
 
 ## Tests

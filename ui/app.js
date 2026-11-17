@@ -17,6 +17,8 @@ const FOLDER_ICON =
   '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>';
 
 let strip = { tabs: [], activeId: null };
+// The two tabs shown side by side, if any.
+let splitIds = [];
 let shownActiveId = null;
 let windowId = 0;
 let selectOnClick = false;
@@ -189,6 +191,7 @@ function renderTabs() {
     element.title = tabLabel(tab);
     element.setAttribute("aria-selected", String(tab.id === strip.activeId));
     element.classList.toggle("discarded", Boolean(tab.discarded));
+    element.toggleAttribute("data-split", splitIds.includes(tab.id));
     // The spinner takes the icon's place while loading.
     const picture = element.querySelector(".tab-favicon");
     const data = tab.favicon ? favicons.get(tab.favicon) : null;
@@ -525,6 +528,7 @@ window.onBrowserEvent = (event) => {
   } else if (event.type === "tabs") {
     const switched = event.strip.activeId !== strip.activeId;
     strip = event.strip;
+    splitIds = event.split || [];
     windowId = event.windowId;
     document.documentElement.toggleAttribute("data-private", Boolean(event.private));
     byId("private-badge").hidden = !event.private;
@@ -777,6 +781,7 @@ function openAppMenu() {
     { label: "Downloads", shortcut: shortcut("J"), command: page("downloads") },
     { label: "Bookmarks", shortcut: shortcut("O", { shift: true }), command: page("bookmarks") },
     { label: "Extensions", command: page("extensions") },
+    { label: splitIds.length ? "Close split view" : "Split view: two pages side by side", command: { type: "toggleSplitView" } },
     { label: tabLayout.vertical ? "Show tabs across the top" : "Show tabs down the side", command: { type: "setVerticalTabs", enabled: !tabLayout.vertical } },
     { kind: "separator" },
     { kind: "zoom", percent: activeTab()?.zoomPercent || 100 },

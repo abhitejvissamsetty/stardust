@@ -702,3 +702,15 @@ svg {
 
 /* Tabs down the side: the row across the top goes, and the tab list takes over. */
 :root[data-vertical-tabs] .tab-row { display: none; }
+
+/* The two tabs shown side by side are underlined in the accent colour. */
+.tab[data-split]::after {
+  background: var(--accent);
+  border-radius: 2px;
+  bottom: 4px;
+  content: "";
+  height: 2px;
+  left: 14px;
+  position: absolute;
+  right: 14px;
+}

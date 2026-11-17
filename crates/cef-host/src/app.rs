@@ -350,11 +350,15 @@ wrap_window_delegate! {
             let Some(body) = panel_create(Some(&mut BodyPanel::new())) else {
                 return;
             };
+            // The gap shows the box's colour, which is the line between two pages of a
+            // split view.
             let body_settings = BoxLayoutSettings {
                 horizontal: 1,
+                between_child_spacing: 2,
                 cross_axis_alignment: AxisAlignment::STRETCH,
                 ..Default::default()
             };
+            body.set_background_color(0xFFB4B6BD);
             let body_layout = body.set_to_box_layout(Some(&body_settings));
             let mut body_view = View::from(&body);
             window.add_child_view(Some(&mut body_view));

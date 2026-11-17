@@ -51,6 +51,7 @@
       .tab[aria-selected="true"] { background: var(--surface); box-shadow: 0 1px 2px rgb(0 0 0 / 12%); }
       .tab[aria-selected="true"]::before { background: var(--accent); border-radius: 2px; content: ""; height: 16px; left: 0; position: absolute; width: 3px; }
       .tab.discarded .title, .tab.discarded .picture { opacity: 0.55; }
+      .tab[data-split] .title::before { background: var(--accent); border-radius: 2px; content: ""; display: inline-block; height: 10px; margin-right: 6px; vertical-align: -1px; width: 10px; }
       .tab.drop-before::after, .tab.drop-after::after { background: var(--accent); content: ""; height: 2px; left: 6px; position: absolute; right: 6px; }
       .tab.drop-before::after { top: -1px; }
       .tab.drop-after::after { bottom: -1px; }
@@ -104,6 +105,7 @@
       const CLOSE = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17" /></svg>';
 
       let strip = { tabs: [], activeId: null };
+      let splitIds = [];
       const favicons = new Map();
       let collapsed = false;
       let dragId = null;
@@ -205,6 +207,7 @@
           element.title = text;
           element.setAttribute("aria-selected", String(tab.id === strip.activeId));
           element.classList.toggle("discarded", Boolean(tab.discarded));
+          element.toggleAttribute("data-split", splitIds.includes(tab.id));
           const data = tab.favicon ? favicons.get(tab.favicon) : null;
           const picture = element.querySelector(".picture");
           element.querySelector(".spinner").hidden = !tab.isLoading;
@@ -243,6 +246,7 @@
       window.onBrowserEvent = (event) => {
         if (event.type === "tabs") {
           strip = event.strip;
+          splitIds = event.split || [];
           document.documentElement.toggleAttribute("data-private", Boolean(event.private));
           byId("private").hidden = !event.private;
           if (event.private) {

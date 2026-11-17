@@ -101,6 +101,8 @@ pub enum UiCommand {
     SetSidebarCollapsed {
         collapsed: bool,
     },
+    /// Shows a second tab beside this one, or goes back to one page.
+    ToggleSplitView,
     NewWindow,
     NewPrivateWindow,
     /// Shows a workspace's window, or opens it with the tabs it had.
@@ -151,6 +153,7 @@ impl UiCommand {
                 | Self::CloseTab { .. }
                 | Self::MoveTab { .. }
                 | Self::ToggleMuteTab { .. }
+                | Self::ToggleSplitView
                 | Self::SetVerticalTabs { .. }
                 | Self::SetSidebarCollapsed { .. }
                 | Self::OpenWorkspace { .. }
@@ -181,6 +184,8 @@ pub enum UiEvent<'a> {
         window_id: u32,
         /// A private window, which looks different and keeps nothing.
         private: bool,
+        /// The two tabs shown side by side, left then right, if there are two.
+        split: Option<(TabId, TabId)>,
     },
     /// A page's icon, as a `data:` address, sent once for the toolbar to remember.
     Favicon {
@@ -342,6 +347,7 @@ mod tests {
             strip: &strip,
             window_id: 1,
             private: false,
+            split: None,
         })
         .unwrap();
         assert!(json.contains(r#""type":"tabs""#));

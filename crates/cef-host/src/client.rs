@@ -145,6 +145,9 @@ pub struct Shell {
     /// A private window. Its pages use a profile that lives in memory, and nothing it
     /// does is saved: no history, session, downloads list or passwords.
     private: bool,
+    /// Two tabs shown side by side, left then right. One of them is the active tab, the
+    /// one the toolbar is about; the other is shown beside it.
+    split: Option<(TabId, TabId)>,
     /// The box that holds the pages, and beside them the vertical tab list when it's on.
     body: Option<Panel>,
     /// The vertical tab list: its browser, the view that holds it, and whether its page
@@ -570,7 +573,7 @@ fn send_to_toolbar(toolbar: Option<&Browser>, event: &UiEvent) {
 }
 
 fn publish(shell: &SharedShell) {
-    let (toolbar, strip, window_id, private) = {
+    let (toolbar, strip, window_id, private, split) = {
         let shell = lock(shell);
         let mut strip = shell.strip.clone();
         // A tab with no browser yet, or one unloaded to save memory, shows dimmed.
@@ -584,12 +587,14 @@ fn publish(shell: &SharedShell) {
             strip,
             shell.window_id,
             shell.private,
+            shell.split,
         )
     };
     let event = UiEvent::Tabs {
         strip: &strip,
         window_id,
         private,
+        split,
     };
     send_to_toolbar(toolbar.as_ref(), &event);
     send_to_toolbar(sidebar_of(shell).as_ref(), &event);
@@ -2025,11 +2030,23 @@ pub fn select_tab(shell: &SharedShell, id: TabId) {
         return;
     }
 
+    let shown_beside;
     let (views, window, title, url) = {
         let mut shell = lock(shell);
         let previous = shell.strip.active_id();
         if !shell.strip.select(id) {
             return;
+        }
+        // In split view, a tab picked from outside the two replaces the one in use.
+        if let Some((left, right)) = shell.split
+            && id != left
+            && id != right
+        {
+            shell.split = if previous == Some(left) {
+                Some((id, right))
+            } else {
+                Some((left, id))
+            };
         }
         let now = now_ms();
         if let Some(previous) = previous {
@@ -2042,6 +2059,7 @@ pub fn select_tab(shell: &SharedShell, id: TabId) {
             .map(|(id, handles)| (*id, handles.view.clone()))
             .collect();
         let tab = shell.strip.get(id);
+        shown_beside = shell.split;
         (
             views,
             shell.window.clone(),
@@ -2050,8 +2068,11 @@ pub fn select_tab(shell: &SharedShell, id: TabId) {
         )
     };
     for (tab_id, view) in &views {
-        View::from(view).set_visible((*tab_id == id).into());
+        let shown = *tab_id == id
+            || shown_beside.is_some_and(|(left, right)| *tab_id == left || *tab_id == right);
+        View::from(view).set_visible(shown.into());
     }
+    order_split_panes(shell);
     if let Some(window) = window {
         window.layout();
         let title = window_title(shell, &title);
@@ -2134,7 +2155,15 @@ fn remove_tab(shell: &SharedShell, id: TabId) {
         shell.audible.remove(&id);
         shell.discarding.remove(&id);
         shell.keep_loaded.remove(&id);
-        (shell.body.clone(), view, shell.strip.active_id())
+        // Closing one of two tabs shown side by side ends the split and keeps the other.
+        let mut next = shell.strip.active_id();
+        if let Some((left, right)) = shell.split
+            && (left == id || right == id)
+        {
+            shell.split = None;
+            next = Some(if left == id { right } else { left });
+        }
+        (shell.body.clone(), view, next)
     };
     if let (Some(body), Some(view)) = (window, view) {
         body.remove_child_view(Some(&mut View::from(&view)));
@@ -2269,6 +2298,7 @@ fn run_command(shell: &SharedShell, command: UiCommand) {
         ),
         UiCommand::NewPrivateWindow => open_window(None, &[BLANK_PAGE.to_owned()], true),
         UiCommand::OpenWorkspace { id } => open_workspace(&id),
+        UiCommand::ToggleSplitView => toggle_split_view(shell),
         // Only the tab list sends this, and it's handled where it arrives.
         UiCommand::SidebarReady => {}
         UiCommand::SetVerticalTabs { enabled } => set_vertical_tabs(enabled),
@@ -3170,7 +3200,7 @@ wrap_client! {
         }
 
         fn focus_handler(&self) -> Option<FocusHandler> {
-            Some(PageFocus::new(self.shell.clone()))
+            Some(PageFocus::new(self.shell.clone(), self.id))
         }
 
         fn audio_handler(&self) -> Option<AudioHandler> {
@@ -3308,11 +3338,21 @@ wrap_jsdialog_handler! {
 wrap_focus_handler! {
     struct PageFocus {
         shell: SharedShell,
+        id: TabId,
     }
 
     impl FocusHandler {
         fn on_got_focus(&self, _browser: Option<&mut Browser>) {
             hide_extension_popup(&self.shell);
+            // Clicking the other page of a split view makes it the one the toolbar shows.
+            let switch = {
+                let shell = lock(&self.shell);
+                shell.split.is_some_and(|(left, right)| self.id == left || self.id == right)
+                    && shell.strip.active_id() != Some(self.id)
+            };
+            if switch {
+                select_tab(&self.shell, self.id);
+            }
             let toolbar = lock(&self.shell).toolbar.clone();
             send_to_toolbar(toolbar.as_ref(), &UiEvent::PageFocused);
         }
@@ -4006,6 +4046,9 @@ fn discard_inactive_tabs() {
                 || tab.page.is_loading
                 || Some(tab.id) == dialog_tab
                 || shell.keep_loaded.contains(&tab.id)
+                || shell
+                    .split
+                    .is_some_and(|(left, right)| tab.id == left || tab.id == right)
                 || downloading
                 || is_blank;
             loaded.push(LoadedTab {
@@ -4112,6 +4155,52 @@ pub fn load_background_tabs(shell: &SharedShell) {
         }
     }
     publish(shell);
+}
+
+// -- Split view ------------------------------------------------------------------------
+
+/// Puts the two panes of a split view in order, left before right, whatever order their
+/// views were added to the window in.
+fn order_split_panes(shell: &SharedShell) {
+    let (body, left, right) = {
+        let guard = lock(shell);
+        let Some((left, right)) = guard.split else {
+            return;
+        };
+        (
+            guard.body.clone(),
+            guard.handles.get(&left).map(|handles| handles.view.clone()),
+            guard
+                .handles
+                .get(&right)
+                .map(|handles| handles.view.clone()),
+        )
+    };
+    if let (Some(body), Some(left), Some(right)) = (body, left, right) {
+        let last = body.child_view_count() as i32 - 1;
+        body.reorder_child_view(Some(&mut View::from(&left)), last);
+        body.reorder_child_view(Some(&mut View::from(&right)), last);
+    }
+}
+
+/// Shows a new tab beside the current one, or, when two are shown, goes back to one.
+fn toggle_split_view(shell: &SharedShell) {
+    let (is_split, active) = {
+        let guard = lock(shell);
+        (guard.split.is_some(), guard.strip.active_id())
+    };
+    let Some(active) = active else {
+        return;
+    };
+    if is_split {
+        lock(shell).split = None;
+        // Shows the active tab alone again, and hides the other.
+        select_tab(shell, active);
+        return;
+    }
+    let id = create_tab(shell, BLANK_PAGE);
+    lock(shell).split = Some((active, id));
+    attach_tab(shell, id);
 }
 
 // -- The vertical tab list -------------------------------------------------------------
