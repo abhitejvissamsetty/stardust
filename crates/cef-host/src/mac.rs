@@ -79,3 +79,35 @@ pub fn setup_application() {
     let mtm = MainThreadMarker::new().expect("Not running on the main thread");
     assert!(NSApp(mtm).isKindOfClass(BrowserApplication::class()));
 }
+
+/// Puts a PNG picture on the system clipboard, so it pastes as a picture. False if the
+/// clipboard wouldn't take it. Call on the main thread.
+pub fn copy_png(png: &[u8]) -> bool {
+    use std::ffi::c_void;
+
+    use objc2::{class, msg_send};
+
+    // SAFETY: plain Cocoa calls on the main thread, with a byte buffer that outlives them.
+    // `dataWithBytes:length:` copies the bytes before it returns.
+    unsafe {
+        let pasteboard: *mut AnyObject = msg_send![class!(NSPasteboard), generalPasteboard];
+        if pasteboard.is_null() {
+            return false;
+        }
+        let data: *mut AnyObject = msg_send![
+            class!(NSData),
+            dataWithBytes: png.as_ptr().cast::<c_void>(),
+            length: png.len()
+        ];
+        let kind: *mut AnyObject = msg_send![
+            class!(NSString),
+            stringWithUTF8String: c"public.png".as_ptr()
+        ];
+        if data.is_null() || kind.is_null() {
+            return false;
+        }
+        let _: isize = msg_send![pasteboard, clearContents];
+        let stored: Bool = msg_send![pasteboard, setData: data, forType: kind];
+        stored.as_bool()
+    }
+}

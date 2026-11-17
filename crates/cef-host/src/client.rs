@@ -1,5 +1,6 @@
 //! Callbacks for the browsers in the window: the toolbar and one page per tab.
 
+use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -169,6 +170,8 @@ pub struct Shell {
     side_panel_ready: bool,
     /// The tab a clip has been asked for, until its page answers.
     pending_clip: Option<TabId>,
+    /// Pictures taken for screenshot tabs that haven't asked for them yet, as base64.
+    pending_screenshots: HashMap<TabId, String>,
     /// The workspace this window belongs to. Empty is the main one, which uses the
     /// browser's original profile; any other has a profile of its own on disk.
     workspace: String,
@@ -2350,6 +2353,7 @@ fn run_command(shell: &SharedShell, command: UiCommand) {
         UiCommand::RemoveSnippet { id } => change_panel_data(|data| data.remove_snippet(id)),
         UiCommand::AddCurrentPageSnippet => add_current_page_snippet(shell),
         UiCommand::ClipPage => clip_page(shell),
+        UiCommand::Screenshot { full } => take_screenshot(shell, full),
         UiCommand::RemoveClip { id } => change_panel_data(|data| data.remove_clip(id)),
         UiCommand::OpenClip { id } => {
             let url = panel_data().clip_url(id).map(str::to_owned);
@@ -2492,7 +2496,7 @@ fn refresh_bookmark_stars() {
     publish_bookmarks_bar();
 }
 
-fn run_page_command(shell: &SharedShell, frame: &Frame, command: PageCommand) {
+fn run_page_command(shell: &SharedShell, tab: TabId, frame: &Frame, command: PageCommand) {
     let reply = |event: serde_json::Value| {
         let code = format!("window.onBrowserEvent({event})");
         frame.execute_java_script(Some(&CefString::from(code.as_str())), None, 0);
@@ -2612,6 +2616,21 @@ fn run_page_command(shell: &SharedShell, frame: &Frame, command: PageCommand) {
         PageCommand::SetSearchEngine { engine } => {
             settings().search_engine = engine;
             with_storage(|storage| storage.set_setting(SETTING_SEARCH_ENGINE, engine.id()));
+        }
+        PageCommand::GetScreenshot => {
+            let data = lock(shell).pending_screenshots.remove(&tab);
+            if let Some(data) = data {
+                reply(serde_json::json!({ "type": "screenshot", "data": data }));
+            }
+        }
+        PageCommand::CopyScreenshot { data } => {
+            let copied = BASE64
+                .decode(data.as_bytes())
+                .ok()
+                // A PNG starts with these eight bytes. Nothing else goes on the clipboard.
+                .filter(|png| png.starts_with(b"\x89PNG\r\n\x1a\n"))
+                .is_some_and(|png| copy_png_to_clipboard(&png));
+            reply(serde_json::json!({ "type": "copied", "ok": copied }));
         }
         PageCommand::ListWorkspaces => reply(workspaces_event(None)),
         PageCommand::CreateWorkspace { name, color } => {
@@ -3314,7 +3333,7 @@ wrap_client! {
                 .map(|list| CefString::from(&list.string(0)).to_string())
                 .unwrap_or_default();
             if let Ok(command) = serde_json::from_str(&json) {
-                run_page_command(&self.shell, frame, command);
+                run_page_command(&self.shell, self.id, frame, command);
             }
             1
         }
@@ -4275,6 +4294,174 @@ fn toggle_split_view(shell: &SharedShell) {
     }
     let id = create_tab(shell, BLANK_PAGE);
     lock(shell).split = Some((active, id));
+    attach_tab(shell, id);
+}
+
+// -- Screenshots ----------------------------------------------------------------------
+//
+// The picture is taken through the page's DevTools protocol, the same way Chromium's own
+// tools do, then opened in a tab of its own for marking up. Nothing is sent anywhere.
+
+/// The tallest picture of a whole page: Chromium's limit for one texture.
+const SCREENSHOT_MAX_HEIGHT: f64 = 16_384.0;
+/// A picture bigger than this (as base64) isn't opened, so a huge page can't stall the browser.
+const SCREENSHOT_MAX_BASE64: usize = 60_000_000;
+
+type DevToolsReply = Box<dyn FnOnce(bool, serde_json::Value)>;
+
+thread_local! {
+    /// Answers waiting for the DevTools protocol, by message number. Callbacks come on the
+    /// UI thread, which is the only one that uses these.
+    static DEV_TOOLS_REPLIES: RefCell<HashMap<i32, DevToolsReply>> = RefCell::default();
+    /// What keeps a watch on a page's DevTools messages going while a picture is taken.
+    static DEV_TOOLS_WATCHES: RefCell<HashMap<i32, Registration>> = RefCell::default();
+}
+
+wrap_dev_tools_message_observer! {
+    struct DevToolsReplies;
+
+    impl DevToolsMessageObserver {
+        fn on_dev_tools_method_result(
+            &self,
+            _browser: Option<&mut Browser>,
+            message_id: i32,
+            success: i32,
+            result: Option<&[u8]>,
+        ) {
+            let reply = DEV_TOOLS_REPLIES.with(|replies| replies.borrow_mut().remove(&message_id));
+            if let Some(reply) = reply {
+                let value = result
+                    .and_then(|bytes| serde_json::from_slice(bytes).ok())
+                    .unwrap_or_default();
+                reply(success != 0, value);
+            }
+        }
+    }
+}
+
+fn next_dev_tools_id() -> i32 {
+    static NEXT: AtomicU32 = AtomicU32::new(1);
+    NEXT.fetch_add(1, Ordering::Relaxed) as i32
+}
+
+/// Calls a DevTools method, and runs `reply` with its answer.
+fn call_dev_tools(
+    host: &BrowserHost,
+    method: &str,
+    mut params: DictionaryValue,
+    reply: impl FnOnce(bool, serde_json::Value) + 'static,
+) {
+    let id = next_dev_tools_id();
+    DEV_TOOLS_REPLIES.with(|replies| replies.borrow_mut().insert(id, Box::new(reply)));
+    host.execute_dev_tools_method(id, Some(&CefString::from(method)), Some(&mut params));
+}
+
+fn string_param(params: &mut DictionaryValue, key: &str, value: &str) {
+    params.set_string(Some(&CefString::from(key)), Some(&CefString::from(value)));
+}
+
+/// Takes a picture of the active page, of what's showing or of all of it, and opens it in
+/// a new tab to mark up.
+fn take_screenshot(shell: &SharedShell, full: bool) {
+    let page = {
+        let guard = lock(shell);
+        guard
+            .strip
+            .active_id()
+            .and_then(|id| guard.strip.get(id))
+            .filter(|tab| is_web_url(&tab.page.url))
+            .map(|tab| tab.id)
+    };
+    let host = active_browser(shell).and_then(|browser| browser.host());
+    let (Some(_), Some(host)) = (page, host) else {
+        toast(shell, "Only web pages can be captured");
+        return;
+    };
+    let watch = next_dev_tools_id();
+    let mut observer = DevToolsReplies::new();
+    if let Some(registration) = host.add_dev_tools_message_observer(Some(&mut observer)) {
+        DEV_TOOLS_WATCHES.with(|watches| watches.borrow_mut().insert(watch, registration));
+    }
+    let shell = shell.clone();
+    let done = move |shell: &SharedShell, data: Option<String>| {
+        DEV_TOOLS_WATCHES.with(|watches| watches.borrow_mut().remove(&watch));
+        match data {
+            Some(data) => open_screenshot(shell, data),
+            None => toast(shell, "Couldn't capture this page"),
+        }
+    };
+    let capture = {
+        let host = host.clone();
+        move |shell: SharedShell, height: Option<f64>, width: f64| {
+            let Some(mut params) = dictionary_value_create() else {
+                done(&shell, None);
+                return;
+            };
+            string_param(&mut params, "format", "png");
+            if let Some(height) = height {
+                params.set_bool(Some(&CefString::from("captureBeyondViewport")), 1);
+                if let Some(mut clip) = dictionary_value_create() {
+                    clip.set_double(Some(&CefString::from("x")), 0.0);
+                    clip.set_double(Some(&CefString::from("y")), 0.0);
+                    clip.set_double(Some(&CefString::from("width")), width);
+                    clip.set_double(Some(&CefString::from("height")), height);
+                    clip.set_double(Some(&CefString::from("scale")), 1.0);
+                    params.set_dictionary(Some(&CefString::from("clip")), Some(&mut clip));
+                }
+            }
+            call_dev_tools(&host, "Page.captureScreenshot", params, move |ok, value| {
+                let data = value
+                    .get("data")
+                    .and_then(|data| data.as_str())
+                    .filter(|data| ok && !data.is_empty() && data.len() <= SCREENSHOT_MAX_BASE64)
+                    .map(str::to_owned);
+                done(&shell, data);
+            });
+        }
+    };
+    if !full {
+        capture(shell, None, 0.0);
+        return;
+    }
+    // A whole page: ask how big it is first.
+    let Some(params) = dictionary_value_create() else {
+        return;
+    };
+    call_dev_tools(&host, "Page.getLayoutMetrics", params, move |_, value| {
+        let size = value
+            .get("cssContentSize")
+            .or_else(|| value.get("contentSize"));
+        let number = |key: &str| size.and_then(|size| size.get(key)).and_then(|n| n.as_f64());
+        match (number("width"), number("height")) {
+            (Some(width), Some(height)) if width >= 1.0 && height >= 1.0 => {
+                capture(
+                    shell,
+                    Some(height.min(SCREENSHOT_MAX_HEIGHT)),
+                    width.min(SCREENSHOT_MAX_HEIGHT),
+                );
+            }
+            _ => toast(&shell, "Couldn't measure this page"),
+        }
+    });
+}
+
+/// Puts a PNG on the system clipboard. Only macOS can so far.
+fn copy_png_to_clipboard(png: &[u8]) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        crate::mac::copy_png(png)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = png;
+        false
+    }
+}
+
+/// Opens a taken picture in a new tab. The tab's page asks for it when it has loaded.
+fn open_screenshot(shell: &SharedShell, data: String) {
+    let id = create_tab(shell, internal_url(InternalPage::Screenshot));
+    lock(shell).pending_screenshots.insert(id, data);
     attach_tab(shell, id);
 }
 

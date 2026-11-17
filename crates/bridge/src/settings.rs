@@ -117,16 +117,25 @@ pub enum InternalPage {
     Settings,
     Downloads,
     Extensions,
+    /// Shows one screenshot to mark up. It has nothing to show on its own, so it isn't
+    /// brought back after a restart.
+    Screenshot,
 }
 
 impl InternalPage {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::History,
         Self::Bookmarks,
         Self::Settings,
         Self::Downloads,
         Self::Extensions,
+        Self::Screenshot,
     ];
+
+    /// Whether a saved tab on this page is reopened after a restart.
+    pub fn is_restorable(self) -> bool {
+        self != Self::Screenshot
+    }
 
     pub fn address(self) -> &'static str {
         match self {
@@ -135,6 +144,7 @@ impl InternalPage {
             Self::Settings => "browser://settings",
             Self::Downloads => "browser://downloads",
             Self::Extensions => "browser://extensions",
+            Self::Screenshot => "browser://screenshot",
         }
     }
 
@@ -153,6 +163,12 @@ impl InternalPage {
     rename_all_fields = "camelCase"
 )]
 pub enum PageCommand {
+    /// The screenshot page asks for the picture that was taken for it.
+    GetScreenshot,
+    /// Puts the marked-up picture, as base64 PNG, on the clipboard.
+    CopyScreenshot {
+        data: String,
+    },
     ListWorkspaces,
     CreateWorkspace {
         name: String,

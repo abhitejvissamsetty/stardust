@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: blob:; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
+    <title>Screenshot</title>
+    <style>
+      /*TOKENS*/
+      * { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; }
+      body { background: var(--page); color: var(--text); display: flex; flex-direction: column; font: var(--text-sm) var(--font-ui); }
+      button, input, select { font: inherit; }
+      svg { fill: none; height: 16px; stroke: currentcolor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.75; width: 16px; }
+      .bar { align-items: center; background: var(--surface); border-bottom: 1px solid var(--divider); display: flex; flex-wrap: wrap; gap: var(--space-2); padding: var(--space-2) var(--space-3); }
+      .group { align-items: center; display: flex; gap: 2px; }
+      .sep { background: var(--divider); height: 22px; margin: 0 var(--space-1); width: 1px; }
+      .tool, .act {
+        align-items: center; background: transparent; border: 0; border-radius: 6px; color: var(--text);
+        cursor: default; display: flex; gap: 6px; height: 32px; justify-content: center; min-width: 32px; padding: 0 8px;
+      }
+      .tool:hover, .act:hover { background: var(--hover); }
+      .tool[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
+      .act:disabled { color: var(--text-disabled); }
+      .primary { background: var(--accent); color: var(--on-accent); padding: 0 14px; }
+      .primary:hover { background: var(--accent); filter: brightness(1.08); }
+      .swatch { border: 2px solid transparent; border-radius: 50%; cursor: default; height: 22px; padding: 0; width: 22px; }
+      .swatch[aria-pressed="true"] { border-color: var(--text); }
+      .size[aria-pressed="true"] { background: var(--accent-soft); }
+      .size i { background: currentcolor; border-radius: 50%; display: block; }
+      .spacer { flex: 1; }
+      .status { color: var(--text-muted); min-width: 90px; text-align: right; }
+      .stage { flex: 1; overflow: auto; padding: var(--space-3); position: relative; text-align: center; }
+      .wrap { display: inline-block; position: relative; box-shadow: var(--shadow); line-height: 0; }
+      canvas { cursor: crosshair; display: block; max-width: 100%; }
+      .empty { color: var(--text-muted); padding: 80px 20px; text-align: center; }
+      .textbox { background: rgb(255 255 255 / 85%); border: 1px dashed #666; color: #000; font-family: system-ui, sans-serif; outline: none; padding: 0 2px; position: absolute; white-space: pre; }
+      [hidden] { display: none !important; }
+    </style>
+  </head>
+  <body>
+    <div class="bar" id="bar" role="toolbar" aria-label="Annotation tools" hidden>
+      <div class="group" id="tools"></div>
+      <span class="sep"></span>
+      <div class="group" id="colors" aria-label="Colour"></div>
+      <span class="sep"></span>
+      <div class="group" id="sizes" aria-label="Thickness"></div>
+      <span class="sep"></span>
+      <div class="group">
+        <button class="act" id="undo" title="Undo" aria-label="Undo" disabled><svg viewBox="0 0 24 24"><path d="M9 7L4 12l5 5M4 12h10a6 6 0 0 1 0 12" transform="translate(0 -3)" /></svg></button>
+        <button class="act" id="redo" title="Redo" aria-label="Redo" disabled><svg viewBox="0 0 24 24"><path d="M15 7l5 5-5 5M20 12H10a6 6 0 0 0 0 12" transform="translate(0 -3)" /></svg></button>
+      </div>
+      <span class="spacer"></span>
+      <span class="status" id="status" role="status"></span>
+      <button class="act" id="copy" type="button">Copy</button>
+      <button class="act primary" id="save" type="button">Save PNG</button>
+    </div>
+    <div class="stage" id="stage">
+      <div class="empty" id="empty">No screenshot here. Use the menu: Screenshot, visible area or full page.</div>
+      <div class="wrap" id="wrap" hidden><canvas id="canvas" aria-label="Screenshot to annotate"></canvas></div>
+    </div>
+    <div class="clip" id="clip" contenteditable="true"></div>
+    <script>
+      "use strict";
+      const send = (command) => window.browserBridge.send(JSON.stringify(command));
+      const byId = (id) => document.getElementById(id);
+      const canvas = byId("canvas");
+      const ctx = canvas.getContext("2d");
+
+      const TOOLS = [
+        ["pen", "Pen", '<svg viewBox="0 0 24 24"><path d="M4 20l4-1 11-11-3-3L5 16z" /></svg>'],
+        ["arrow", "Arrow", '<svg viewBox="0 0 24 24"><path d="M5 19L19 5M10 5h9v9" /></svg>'],
+        ["rect", "Rectangle", '<svg viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="12" rx="1" /></svg>'],
+        ["highlight", "Highlight", '<svg viewBox="0 0 24 24"><path d="M4 18h16M7 14l5-9 5 9z" /></svg>'],
+        ["text", "Text", '<svg viewBox="0 0 24 24"><path d="M5 6h14M12 6v13M9 19h6" /></svg>'],
+        ["blur", "Hide with blocks", '<svg viewBox="0 0 24 24"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z" /></svg>'],
+        ["crop", "Crop", '<svg viewBox="0 0 24 24"><path d="M7 3v14h14M3 7h14v14" /></svg>'],
+      ];
+      const COLORS = ["#e5322d", "#f5b800", "#2e9e6b", "#2f6fed", "#111111", "#ffffff"];
+      const SIZES = [3, 6, 10];
+
+      let image = null;
+      let shapes = [];
+      let redo = [];
+      let tool = "arrow";
+      let color = COLORS[0];
+      let size = SIZES[1];
+      let draft = null;
+
+      // Setup of the controls -----------------------------------------------------
+      for (const [id, label, icon] of TOOLS) {
+        const button = Object.assign(document.createElement("button"), { className: "tool", title: label, innerHTML: icon });
+        button.dataset.tool = id;
+        button.setAttribute("aria-label", label);
+        button.addEventListener("click", () => setTool(id));
+        byId("tools").append(button);
+      }
+      for (const value of COLORS) {
+        const button = Object.assign(document.createElement("button"), { className: "swatch", title: value });
+        button.style.background = value;
+        if (value === "#ffffff") button.style.boxShadow = "inset 0 0 0 1px #bbb";
+        button.dataset.color = value;
+        button.setAttribute("aria-label", `Colour ${value}`);
+        button.addEventListener("click", () => { color = value; refreshControls(); });
+        byId("colors").append(button);
+      }
+      for (const value of SIZES) {
+        const button = Object.assign(document.createElement("button"), { className: "tool size", title: `Thickness ${value}` });
+        button.innerHTML = `<i style="width:${value + 4}px;height:${value + 4}px"></i>`;
+        button.dataset.size = String(value);
+        button.setAttribute("aria-label", `Thickness ${value}`);
+        button.addEventListener("click", () => { size = value; refreshControls(); });
+        byId("sizes").append(button);
+      }
+      function setTool(id) { commitText(); tool = id; refreshControls(); }
+      function refreshControls() {
+        for (const button of byId("tools").children) button.setAttribute("aria-pressed", String(button.dataset.tool === tool));
+        for (const button of byId("colors").children) button.setAttribute("aria-pressed", String(button.dataset.color === color));
+        for (const button of byId("sizes").children) button.setAttribute("aria-pressed", String(Number(button.dataset.size) === size));
+        byId("undo").disabled = shapes.length === 0;
+        byId("redo").disabled = redo.length === 0;
+      }
+      function say(text) {
+        byId("status").textContent = text;
+        clearTimeout(say.timer);
+        say.timer = setTimeout(() => (byId("status").textContent = ""), 2200);
+      }
+
+      // Drawing -------------------------------------------------------------------
+      function arrowHead(c, x1, y1, x2, y2, width) {
+        const angle = Math.atan2(y2 - y1, x2 - x1);
+        const length = Math.max(14, width * 4);
+        c.beginPath();
+        c.moveTo(x2, y2);
+        c.lineTo(x2 - length * Math.cos(angle - 0.45), y2 - length * Math.sin(angle - 0.45));
+        c.moveTo(x2, y2);
+        c.lineTo(x2 - length * Math.cos(angle + 0.45), y2 - length * Math.sin(angle + 0.45));
+        c.stroke();
+      }
+      function normalized(shape) {
+        return { x: Math.min(shape.x1, shape.x2), y: Math.min(shape.y1, shape.y2), w: Math.abs(shape.x2 - shape.x1), h: Math.abs(shape.y2 - shape.y1) };
+      }
+      function drawShape(c, shape) {
+        c.save();
+        c.lineCap = "round";
+        c.lineJoin = "round";
+        c.strokeStyle = shape.color;
+        c.fillStyle = shape.color;
+        c.lineWidth = shape.size;
+        if (shape.type === "pen") {
+          c.beginPath();
+          shape.points.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y)));
+          c.stroke();
+        } else if (shape.type === "arrow") {
+          c.beginPath();
+          c.moveTo(shape.x1, shape.y1);
+          c.lineTo(shape.x2, shape.y2);
+          c.stroke();
+          arrowHead(c, shape.x1, shape.y1, shape.x2, shape.y2, shape.size);
+        } else if (shape.type === "rect") {
+          const r = normalized(shape);
+          c.strokeRect(r.x, r.y, r.w, r.h);
+        } else if (shape.type === "highlight") {
+          const r = normalized(shape);
+          c.globalAlpha = 0.35;
+          c.fillRect(r.x, r.y, r.w, r.h);
+        } else if (shape.type === "blur") {
+          const r = normalized(shape);
+          if (r.w > 1 && r.h > 1) {
+            const block = Math.max(8, Math.round(Math.min(r.w, r.h) / 6), shape.size * 2);
+            const small = document.createElement("canvas");
+            small.width = Math.max(1, Math.round(r.w / block));
+            small.height = Math.max(1, Math.round(r.h / block));
+            small.getContext("2d").drawImage(image, r.x, r.y, r.w, r.h, 0, 0, small.width, small.height);
+            c.imageSmoothingEnabled = false;
+            c.drawImage(small, 0, 0, small.width, small.height, r.x, r.y, r.w, r.h);
+          }
+        } else if (shape.type === "text") {
+          c.font = `600 ${shape.size * 5 + 10}px system-ui, sans-serif`;
+          c.textBaseline = "top";
+          shape.text.split("\n").forEach((line, i) => c.fillText(line, shape.x1, shape.y1 + i * (shape.size * 5 + 14)));
+        }
+        c.restore();
+      }
+      function cropOf() {
+        for (let i = shapes.length - 1; i >= 0; i--) if (shapes[i].type === "crop") return normalized(shapes[i]);
+        return null;
+      }
+      function render() {
+        if (!image) return;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(image, 0, 0);
+        for (const shape of shapes) if (shape.type !== "crop") drawShape(ctx, shape);
+        if (draft && draft.type !== "crop") drawShape(ctx, draft);
+        const crop = draft && draft.type === "crop" ? normalized(draft) : cropOf();
+        if (crop && crop.w > 1 && crop.h > 1) {
+          // Dim what the crop leaves out, and outline what it keeps.
+          ctx.save();
+          ctx.fillStyle = "rgb(0 0 0 / 50%)";
+          ctx.fillRect(0, 0, canvas.width, crop.y);
+          ctx.fillRect(0, crop.y + crop.h, canvas.width, canvas.height - crop.y - crop.h);
+          ctx.fillRect(0, crop.y, crop.x, crop.h);
+          ctx.fillRect(crop.x + crop.w, crop.y, canvas.width - crop.x - crop.w, crop.h);
+          ctx.strokeStyle = "#fff";
+          ctx.setLineDash([8, 6]);
+          ctx.lineWidth = 2;
+          ctx.strokeRect(crop.x, crop.y, crop.w, crop.h);
+          ctx.restore();
+        }
+      }
+      function point(event) {
+        const box = canvas.getBoundingClientRect();
+        return [((event.clientX - box.left) * canvas.width) / box.width, ((event.clientY - box.top) * canvas.height) / box.height];
+      }
+
+      // Pointer handling ----------------------------------------------------------
+      canvas.addEventListener("pointerdown", (event) => {
+        if (!image || event.button !== 0) return;
+        commitText();
+        const [x, y] = point(event);
+        if (tool === "text") { startText(x, y); return; }
+        canvas.setPointerCapture(event.pointerId);
+        draft = tool === "pen" ? { type: "pen", color, size, points: [[x, y]] } : { type: tool, color, size, x1: x, y1: y, x2: x, y2: y };
+      });
+      canvas.addEventListener("pointermove", (event) => {
+        if (!draft) return;
+        const [x, y] = point(event);
+        if (draft.type === "pen") draft.points.push([x, y]); else { draft.x2 = x; draft.y2 = y; }
+        render();
+      });
+      canvas.addEventListener("pointerup", () => {
+        if (!draft) return;
+        const shape = draft;
+        draft = null;
+        const tiny = shape.type === "pen" ? shape.points.length < 2 : Math.abs(shape.x2 - shape.x1) + Math.abs(shape.y2 - shape.y1) < 4;
+        if (!tiny) { shapes.push(shape); redo = []; }
+        render();
+        refreshControls();
+      });
+
+      // Text: an input on the picture, turned into drawn text when it's done.
+      let textBox = null;
+      function startText(x, y) {
+        const box = canvas.getBoundingClientRect();
+        const scale = box.width / canvas.width;
+        const fontSize = (size * 5 + 10) * scale;
+        const element = Object.assign(document.createElement("div"), { className: "textbox", contentEditable: "true" });
+        element.style.left = `${x * scale}px`;
+        element.style.top = `${y * scale}px`;
+        element.style.fontSize = `${fontSize}px`;
+        element.style.minWidth = "40px";
+        element.style.lineHeight = "1.2";
+        element.setAttribute("aria-label", "Text to add");
+        byId("wrap").append(element);
+        textBox = { element, x, y };
+        element.addEventListener("keydown", (event) => {
+          if (event.key === "Escape") { element.textContent = ""; commitText(); }
+          if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); commitText(); }
+        });
+        setTimeout(() => element.focus(), 0);
+      }
+      function commitText() {
+        if (!textBox) return;
+        const { element, x, y } = textBox;
+        textBox = null;
+        const text = element.innerText.replace(/\s+$/, "");
+        element.remove();
+        if (text) { shapes.push({ type: "text", color, size, x1: x, y1: y, text }); redo = []; render(); refreshControls(); }
+      }
+
+      // Undo, redo, save and copy -------------------------------------------------
+      function undo() { commitText(); if (shapes.length) { redo.push(shapes.pop()); render(); refreshControls(); } }
+      function redoShape() { if (redo.length) { shapes.push(redo.pop()); render(); refreshControls(); } }
+      byId("undo").addEventListener("click", undo);
+      byId("redo").addEventListener("click", redoShape);
+      document.addEventListener("keydown", (event) => {
+        const mod = event.metaKey || event.ctrlKey;
+        if (mod && event.key.toLowerCase() === "z" && !event.target.isContentEditable) {
+          event.preventDefault();
+          if (event.shiftKey) redoShape(); else undo();
+        }
+      });
+
+      // What is saved: the picture with its marks, cut to the crop if there is one.
+      function exportCanvas() {
+        commitText();
+        const out = document.createElement("canvas");
+        const crop = cropOf();
+        const c = crop && crop.w > 1 && crop.h > 1 ? crop : { x: 0, y: 0, w: canvas.width, h: canvas.height };
+        out.width = Math.round(c.w);
+        out.height = Math.round(c.h);
+        const octx = out.getContext("2d");
+        octx.drawImage(image, c.x, c.y, c.w, c.h, 0, 0, out.width, out.height);
+        octx.translate(-c.x, -c.y);
+        for (const shape of shapes) if (shape.type !== "crop") drawShape(octx, shape);
+        return out;
+      }
+      function stamp() {
+        const d = new Date();
+        const two = (n) => String(n).padStart(2, "0");
+        return `Screenshot ${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())} at ${two(d.getHours())}.${two(d.getMinutes())}.${two(d.getSeconds())}.png`;
+      }
+      byId("save").addEventListener("click", () => {
+        if (!image) return;
+        exportCanvas().toBlob((blob) => {
+          const link = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: stamp() });
+          document.body.append(link);
+          link.click();
+          link.remove();
+          say("Saving to Downloads");
+        }, "image/png");
+      });
+      // The browser puts the picture on the clipboard itself, since a data page can't use
+      // the clipboard's own API and copying an image from a page only keeps its HTML.
+      byId("copy").addEventListener("click", () => {
+        if (!image) return;
+        exportCanvas().toBlob((blob) => {
+          const reader = new FileReader();
+          reader.onload = () => send({ type: "copyScreenshot", data: String(reader.result).split(",")[1] || "" });
+          reader.readAsDataURL(blob);
+        }, "image/png");
+      });
+
+      // The browser sends the picture once, when asked.
+      window.onBrowserEvent = (event) => {
+        if (event.type === "copied") {
+          say(event.ok ? "Copied" : "Copying a picture isn't available here yet. Use Save PNG.");
+          return;
+        }
+        if (event.type !== "screenshot") return;
+        const loaded = new Image();
+        loaded.onload = () => {
+          image = loaded;
+          canvas.width = loaded.naturalWidth;
+          canvas.height = loaded.naturalHeight;
+          shapes = [];
+          redo = [];
+          byId("empty").hidden = true;
+          byId("wrap").hidden = false;
+          byId("bar").hidden = false;
+          refreshControls();
+          render();
+          say(`${loaded.naturalWidth} × ${loaded.naturalHeight}`);
+        };
+        loaded.onerror = () => say("Couldn't read the picture");
+        loaded.src = `data:image/png;base64,${event.data}`;
+      };
+      refreshControls();
+      send({ type: "getScreenshot" });
+    </script>
+  </body>
+</html>

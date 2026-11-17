@@ -802,6 +802,8 @@ function commandBarItems() {
   command("Reopen closed tab", shortcut("T", { shift: true }), { type: "reopenClosedTab" });
   command("Close this tab", shortcut("W"), { type: "closeTab", id: strip.activeId });
   command("Clip this page", shortcut("S", { shift: true }), { type: "clipPage" });
+  command("Screenshot: what's showing", "Command", { type: "screenshot", full: false });
+  command("Screenshot: the whole page", "Command", { type: "screenshot", full: true });
   command(splitIds.length ? "Close split view" : "Split view", "Command", { type: "toggleSplitView" });
   command(sidePanelOpen ? "Close the side panel" : "Open the side panel", shortcut("E", { shift: true }), { type: "toggleSidePanel" });
   command(tabLayout.vertical ? "Show tabs across the top" : "Show tabs down the side", "Command", { type: "setVerticalTabs", enabled: !tabLayout.vertical });
@@ -942,6 +944,8 @@ function openAppMenu() {
     { label: "Extensions", command: page("extensions") },
     { label: "Command bar: find tabs, workspaces, commands", shortcut: shortcut("A", { shift: true }), command: { type: "commandBar" } },
     { label: "Clip this page", shortcut: shortcut("S", { shift: true }), command: { type: "clipPage" } },
+    { label: "Screenshot: what's showing", command: { type: "screenshot", full: false } },
+    { label: "Screenshot: the whole page", command: { type: "screenshot", full: true } },
     { label: sidePanelOpen ? "Close the side panel" : "Side panel: notes, to-dos, snippets", shortcut: shortcut("E", { shift: true }), command: { type: "toggleSidePanel" } },
     { label: splitIds.length ? "Close split view" : "Split view: two pages side by side", command: { type: "toggleSplitView" } },
     { label: tabLayout.vertical ? "Show tabs across the top" : "Show tabs down the side", command: { type: "setVerticalTabs", enabled: !tabLayout.vertical } },

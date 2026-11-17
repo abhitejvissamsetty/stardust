@@ -1,4 +1,4 @@
-# Milestone 6: workspaces, vertical tabs, split view, side panel, command bar, web clipper and the new icon
+# Milestone 6: workspaces, vertical tabs, split view, side panel, command bar, web clipper, screenshots and the new icon
 
 Built and tested on macOS (Apple Silicon) on 2026-11-17. This is the first piece of Phase 1 of [creator-roadmap.md](creator-roadmap.md). Tested by driving the browser through Chromium's debugging protocol with real clicks, and by screenshots of Stardust's own pages. The native window frame wasn't looked at.
 
@@ -17,6 +17,7 @@ Built and tested on macOS (Apple Silicon) on 2026-11-17. This is the first piece
 | Side panel: notes, to-do list and snippets | **Done** and tested |
 | Command bar: find tabs, workspaces and commands | **Done** and tested |
 | Web clipper: save pages and selected text to the side panel | **Done** and tested |
+| Screenshot and annotate | **Done** and tested on macOS |
 | Icon for Windows and Linux | **Not done**, see below |
 
 ## The icon
@@ -191,6 +192,38 @@ In the running browser: clipping with a selection (the note was the selected sen
 - **Clips per workspace.** They're shared.
 - **Seen once and not understood:** during testing the side panel closed by itself and a "DevTools" page briefly appeared in the debugging list. It didn't come back in the steps that followed. If it does, note what was open.
 - Windows and Linux.
+
+## Screenshots
+
+Menu or command bar: **Screenshot: what's showing** or **Screenshot: the whole page**. The picture opens in a new tab to mark up.
+
+- **Capture:** taken through the page's DevTools protocol, so a whole page is one picture however far it scrolls (up to 16,384 px tall). A test page of 5 sections came out 1265 × 3200, with each section's colour where it should be. Only web pages can be captured.
+- **Tools:** pen, arrow, rectangle, highlight, text, **hide with blocks** (turns a region into blocks, for covering a name or number), and **crop**. Six colours, three thicknesses, undo and redo (also Cmd/Ctrl+Z, and Shift for redo).
+- **Save PNG:** goes to Downloads through the browser's usual download path, named like `Screenshot 2026-11-17 at 18.25.01.png`, and is the marked-up picture cut to the crop. Checked: the saved file exists.
+- **Copy:** puts the marked-up picture on the system clipboard so it pastes as a picture. **macOS only for now.** On other systems it says so and points to Save. Checked on macOS: the clipboard held a PNG of the right size.
+- **Private:** nothing is uploaded. The picture is held in memory for the new tab, handed over once, and only reaches disk if you save it.
+- **Not restored:** a screenshot tab isn't brought back after a restart (it would be empty).
+
+### How it works
+
+- Two DevTools calls: `Page.getLayoutMetrics` (for the whole page's size) and `Page.captureScreenshot` (with `captureBeyondViewport` and a clip). The answers come back through a DevTools message observer, held only while a picture is being taken. Pictures over about 45 MB are refused, so a huge page can't stall the browser.
+- The editor is `ui/screenshot.html`, an internal page like Settings. It draws on a canvas: the picture, then each mark in order, so undo just removes the last mark. Crop and the block effect are applied when saving, from the untouched picture.
+- The browser hands the picture to the tab that was opened for it, once, when the page asks (`getScreenshot`). Copy sends the marked-up PNG back to the browser, which checks it's a PNG before putting it on the clipboard.
+- Two things that didn't work and were changed: copying an image out of a page only puts its HTML on the clipboard (so Copy is done natively), and `Page.captureScreenshot` needs the layout metrics first to capture below the fold.
+
+### Tested
+
+On macOS, with real mouse events on the editor: visible-area and whole-page capture, every tool, undo and redo, text typed in, crop (export 950 × 570), Save (file in Downloads) and Copy (PNG on the clipboard). A screenshot of the editor was looked at. A unit test covers the screenshot tab not being restored.
+
+### Not tested or not built
+
+- **A region you drag out on the page.** Capture is the visible area or the whole page; crop in the editor does the rest.
+- **Copy on Windows and Linux,** and the rest of this on both.
+- **Move, resize or edit marks after drawing them.** Undo and redraw.
+- **Capturing a page that's zoomed, in a split view,** or a very wide or tall page beyond the limit (it's cut at 16,384 px).
+- **A keyboard shortcut.** It's in the menu and command bar.
+- **Screen and window capture, and recording.** That's a separate piece (capture and a picker, in Phase 0) and still needs research.
+- **The block effect** was drawn but, on a plain-coloured test page, can't be seen changing anything. Not checked on real text.
 
 ## Tests
 

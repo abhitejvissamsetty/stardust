@@ -24,7 +24,7 @@ pub struct Session {
 }
 
 fn can_restore(url: &str) -> bool {
-    is_web_url(url) || InternalPage::from_address(url).is_some()
+    is_web_url(url) || InternalPage::from_address(url).is_some_and(InternalPage::is_restorable)
 }
 
 impl SessionTab {
@@ -221,5 +221,16 @@ mod tests {
         assert_eq!(saved.windows[0].tabs.len(), 1);
         assert_eq!(saved.windows[0].tabs[0].url, "https://a.com");
         assert_eq!(saved.windows[0].active, 0);
+    }
+
+    #[test]
+    fn a_screenshot_tab_is_not_brought_back() {
+        let json = r#"{"windows":[{"tabs":[
+            {"url":"browser://screenshot","title":"Screenshot"},
+            {"url":"browser://settings","title":"Settings"}
+        ],"active":0}]}"#;
+        let tabs = &SavedWindows::parse(json).windows[0].tabs;
+        assert_eq!(tabs.len(), 1);
+        assert_eq!(tabs[0].url, "browser://settings");
     }
 }
