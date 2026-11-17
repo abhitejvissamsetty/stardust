@@ -17,26 +17,47 @@ All values live in [`ui/tokens.css`](../ui/tokens.css). Don't hard-code colors o
 ## Tab strip
 
 - **Height:** 40px, above the toolbar, on a darker background than the toolbar.
-- **Tabs:** 220px wide, shrinking evenly as more open. The active tab matches the toolbar's surface color.
-- **Tab contents:** a spinner while loading, the page title, and a close button.
+- **Tabs:** 34px tall with rounded top corners, 220px wide, shrinking evenly as more open. The active tab matches the toolbar's surface color and joins it by a 9px curve at each foot.
+- **Tab contents:** the page's icon (a globe until it arrives), the title, a speaker button while it plays sound, and a close button. The spinner takes the icon's place while loading. The close button shows on the selected tab and on hover.
+- **Unloaded tabs:** a tab with no page loaded, because it was restored or unloaded to save memory, is dimmed.
+- **Private badge:** a window that keeps nothing shows a purple "Private" badge at the right of this row.
 - **New tabs:** open to the right of the active tab, with the address bar focused.
 - **Closing:** the right neighbor shows next, or the left one for the last position. Closing the last tab closes the window.
 - **Mouse:** click to switch, drag to reorder, middle-click to close.
 
+## Themes
+
+Light and dark follow the system. A private window is always dark, with a purple accent, set by `data-private` on the page. All values are tokens in `ui/tokens.css`, which also has the colours for warnings and success, and the text colour for use on the accent.
+
 ## Toolbar
 
 - **Height:** 48px, with a 1px divider at the bottom.
-- **Order:** Back, Forward, Reload or Stop, then the address field filling the remaining width.
+- **Order:** Back, Forward, Reload or Stop, then the address field filling the remaining width, then pinned extension buttons, the extensions button and the menu button.
 - **Buttons:** 32px square with 18px line icons. Hover and press use a translucent fill, so they work on both themes.
 - **Disabled buttons:** use the disabled text color, with no hover effect.
 
 ## Address field
 
-- **At rest:** a pill showing the page's full URL, with a lock icon for `https://` pages. The lock only reflects the URL scheme, because the certificate details aren't shown yet.
+- **At rest:** a 34px pill showing the page's full URL, with a lock icon for `https://` pages, and an amber "Not secure" label for plain `http://` pages other than local addresses. The lock only reflects the URL scheme, because the certificate details aren't shown yet.
+- **Zoom:** a chip with the percentage appears when the page isn't at 100%. Clicking it resets the zoom.
+- **Buttons inside:** the saved-login key, when the site has one, and the bookmark star.
 - **Focused:** a 2px accent outline, with all text selected so typing replaces it.
 - **Enter:** goes to a URL or host name, otherwise searches. The destination shows immediately.
 - **Escape:** restores the current URL.
 - **Text safety:** page-controlled text is only ever set through `value` or `textContent`, never as HTML.
+
+## Menus
+
+Menus hang under the toolbar, with their right edge under their button, and show one at a time.
+
+- **App menu:** New tab, window and private window; History, Downloads, Bookmarks and Extensions; zoom with a full screen button; Print, Find, Reopen closed tab and Developer tools; Settings; Quit. Rows are 34px with the shortcut on the right.
+- **Extensions menu:** each extension that's on, with its icon and a pin button, and "Manage extensions".
+- **Extension popups** show under the button, 380 by 520, in a browser of their own. They close on a click elsewhere, a tab switch, a second press of the button, or Escape.
+- A click anywhere else in the toolbar, or in the page, puts a menu away.
+
+## Extensions page
+
+`browser://extensions`: a card for each extension with its icon, name, version and description, chips for the strongest things it can do, an on/off switch, and Details, Pin and Remove. Adding one shows a card of what it will be able to do, in plain words, before it's added. A banner offers a restart when changes need one.
 
 ## Loading
 
@@ -86,6 +107,14 @@ History, Bookmarks and Settings are centered single-column pages, 760px wide at 
 | Previous tab | Ctrl+Shift+Tab | Ctrl+Shift+Tab |
 | Tab 1 to 8 | Ctrl+1 to Ctrl+8 | Cmd+1 to Cmd+8 |
 | Last tab | Ctrl+9 | Cmd+9 |
+| New private window | Ctrl+Shift+N | Cmd+Shift+N |
+| Reopen closed tab | Ctrl+Shift+T | Cmd+Shift+T |
+| Move tab left or right | Ctrl+Shift+Page Up or Down | Cmd+Shift+Page Up or Down |
+| Zoom in, out, reset | Ctrl + `+`, `-`, `0` | Cmd + `+`, `-`, `0` |
+| Print | Ctrl+P | Cmd+P |
+| Developer tools | F12, Ctrl+Shift+I | Cmd+Option+I |
+| Full screen | F11 | Ctrl+Cmd+F |
+| Minimize | | Cmd+M |
 | Quit, closing all windows | Ctrl+Q | Cmd+Q |
 
 ## Accessibility

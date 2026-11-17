@@ -16,7 +16,7 @@ Built and tested on macOS (Apple Silicon) on 2026-11-06. Tests drove the browser
 | Password saving and filling | **Done**, tested with a stand-in password store |
 | Cookie encryption review | **Done**: cookies are encrypted, see below |
 | Hardware video decoding | **On by default on macOS**, checked. Turned on automatically on Linux where a VA-API driver is installed, untested |
-| Extension review | **Done**: a decision, see below |
+| Extension review | **Done, but its answer was wrong and has been corrected**: extensions work, see [milestone-5.md](milestone-5.md) |
 | H.264 and AAC | **Not started.** Needs legal advice on patent licensing first |
 
 The milestone's "done when" isn't met yet. Updates work on macOS only, and the README's warning against logins and banking stays until there's a release server and a real signing key.
@@ -129,7 +129,9 @@ Stardust's own database, with history, bookmarks, settings and saved login names
 
 ## Extension review
 
-**Decision: no extensions with the current design.**
+> **Corrected on 2026-11-17.** The conclusion below was wrong. CEF's API can't load extensions, but Chromium's own extension system is still there in Alloy style and loads any folder given to `--load-extension`. Stardust now supports Chrome extensions without moving to Chrome style: see [milestone-5.md](milestone-5.md#extensions). The original text is kept for the record.
+
+**Decision at the time: no extensions with the current design.**
 
 CEF 156, which Stardust uses, has no extension support for Alloy-style browsers: its API has no way to load or manage extensions. Chrome extensions only work in CEF's Chrome-style browsers, and every browser in a window must share one style.
 

@@ -113,11 +113,22 @@ In `crates/cef-host/src/client.rs` (`offer_to_save_login`, `fill_login`), `crate
 
 ## 10. Extensions
 
-Decided against for now. CEF 156 has no extension API for Alloy style, and Chrome extensions need CEF's Chrome style, which every browser in a window must share. Moving to Chrome style would bring extensions, Chrome's password manager and its permission prompts, but also parts of Chrome's interface, and it would change most of how the window is built. Revisit only as a deliberate change of direction.
+**Updated 2026-11-17: extensions now work.** An earlier version of this section said they couldn't without moving to CEF's Chrome style. That was wrong: Chromium's extension system runs in Alloy style too, and loads any folder given to `--load-extension`. Stardust has an extensions hub, a toolbar menu, pinned buttons and popups. See [milestone-5.md](milestone-5.md#extensions) for what works and what doesn't.
 
-## 11. Never looked at on screen
+What's left:
 
-Everything since Milestone 3 was tested through code, logs and Chromium's debugging protocol, never by eye. Have a person check: the Settings page (Updates, Saved passwords, Site permissions, the memory switch), the toolbar's key button, the permission and save-password prompts, the find bar's Aa button, and suggestions under the address bar.
+1. **Decide on the Chrome Web Store.** Most people find extensions there. Installing from it means fetching `.crx` files from Google's update service. The unpacking is already built (`crates/extensions`). Whether Google's terms allow it for a browser other than Chrome is the open question. Brave, Vivaldi and Edge do it, with their own arrangements.
+2. **Tabs and windows APIs.** `chrome.tabs.query` and `chrome.windows.getAll` return nothing, because Alloy has no Chrome tab model. Extensions built around "the current tab" mostly don't work. A bridge isn't possible from CEF's API, and would likely mean patching Chromium.
+3. **Extensions without a restart.** Chromium only loads extensions as it starts, so each change needs a restart.
+4. **Fit the popup to its content** instead of the fixed 380x520.
+5. **Extension updates**, which the Web Store would normally handle.
+6. Test on Linux and Windows.
+
+## 11. Looked at, but not by a person
+
+**Updated 2026-11-17.** Stardust's own pages can now be looked at without the screen: `python3 scripts/cdp.py shot <page> file.png` saves a picture of the toolbar, a menu, Settings or the extensions hub, which was how Milestone 5 was checked. What can't be seen that way is the native window frame. Have a person check: the window's close, minimize and zoom buttons (**minimize didn't register in tests**), the permission and save-password prompts, print and developer tools, and that nothing looks wrong at other screen sizes or text sizes.
+
+Also: one unexplained "Google" tab appeared once during testing and didn't come back. See [milestone-5.md](milestone-5.md#a-stray-tab).
 
 ## How to test on macOS
 

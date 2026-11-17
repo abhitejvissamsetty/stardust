@@ -11,6 +11,7 @@
 | 2 | Daily-driver features | Done in code. The week of daily use is still to do |
 | 3 | Memory, speed and everyday polish | Built and tested on macOS. Memory goal not met yet: [results](milestone-3.md) |
 | 4 | Safe to recommend | Built and tested on macOS. Needs a release server, a real signing key and a Windows run: [results](milestone-4.md) |
+| 5 | A Chrome-like interface, private windows and extensions | Built and tested on macOS: [results](milestone-5.md). Chrome Web Store install is an open decision |
 
 ## Milestone 3: memory, speed and everyday polish
 
