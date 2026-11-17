@@ -821,6 +821,7 @@ function commandBarItems() {
   command("History", shortcut("H"), page("history"));
   command("Downloads", shortcut("J"), page("downloads"));
   command("Bookmarks", shortcut("O", { shift: true }), page("bookmarks"));
+  command("Library: clips, screenshots, colours", "Page", page("library"));
   command("Extensions", "Page", page("extensions"));
   command("Settings", shortcut(","), page("settings"));
   command("Quit Stardust", shortcut("Q"), { type: "quit" });
@@ -943,6 +944,7 @@ function openAppMenu() {
     { label: "History", shortcut: shortcut("H"), command: page("history") },
     { label: "Downloads", shortcut: shortcut("J"), command: page("downloads") },
     { label: "Bookmarks", shortcut: shortcut("O", { shift: true }), command: page("bookmarks") },
+    { label: "Library: clips, screenshots, colours", command: page("library") },
     { label: "Extensions", command: page("extensions") },
     { label: "Command bar: find tabs, workspaces, commands", shortcut: shortcut("A", { shift: true }), command: { type: "commandBar" } },
     { label: "Clip this page", shortcut: shortcut("S", { shift: true }), command: { type: "clipPage" } },

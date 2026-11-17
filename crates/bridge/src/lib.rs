@@ -7,6 +7,7 @@ mod downloads;
 mod error_page;
 mod history;
 mod inspect;
+mod library;
 mod logins;
 mod messages;
 mod permissions;
@@ -28,6 +29,9 @@ pub use downloads::{Download, DownloadList, DownloadState, safe_file_name, uniqu
 pub use error_page::error_page;
 pub use history::{TabHistory, is_risky_file};
 pub use inspect::INSPECT_SCRIPT;
+pub use library::{
+    Asset, AssetKind, Library, MAX_RESULTS, Shot, clean_tag, search as search_assets, tag_counts,
+};
 pub use logins::{LOGIN_WATCHER, SubmittedLogin, fill_script, login_origin};
 pub use messages::{BrowserState, UiCommand, UiEvent, WindowAction};
 pub use permissions::{Answer, Decision, Permission, SitePermissions, describe, site_origin};

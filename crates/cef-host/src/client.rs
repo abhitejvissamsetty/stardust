@@ -10,8 +10,8 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use bridge::{
-    Answer, DISCARD_CHECK_MS, DISCARD_IDLE_MS, DISCARD_LOADED_LIMIT, Decision, Download,
-    DownloadList, DownloadState, ExtensionSource, INSPECT_SCRIPT, InternalPage, KeyPress,
+    Answer, AssetKind, DISCARD_CHECK_MS, DISCARD_IDLE_MS, DISCARD_LOADED_LIMIT, Decision, Download,
+    DownloadList, DownloadState, ExtensionSource, INSPECT_SCRIPT, InternalPage, KeyPress, Library,
     LoadedTab, PageCommand, Permission, SavedWindows, SearchEngine, Session, SessionTab, Settings,
     Shortcut, SidePanelData, SitePermissions, StartupMode, SubmittedLogin, TabHistory, TabId,
     TabStrip, UiCommand, UiEvent, WindowAction, Workspaces, describe, error_page, is_risky_file,
@@ -71,6 +71,7 @@ const SETTING_SITE_PERMISSIONS: &str = "site_permissions";
 const SETTING_EXTENSIONS: &str = "extensions";
 const SETTING_WORKSPACES: &str = "workspaces";
 const SETTING_SIDE_PANEL: &str = "side_panel";
+const SETTING_LIBRARY: &str = "library";
 /// Each workspace's open tabs are saved under this, then its id.
 const WORKSPACE_TABS_PREFIX: &str = "workspace_tabs_";
 /// Extensions waiting for the person to agree to them. More than this drops the oldest.
@@ -172,7 +173,7 @@ pub struct Shell {
     pending_clip: Option<TabId>,
     /// Pictures taken for screenshot tabs that haven't asked for them yet, as base64.
     /// Each with whether the tab is for picking a colour from it.
-    pending_screenshots: HashMap<TabId, (String, bool)>,
+    pending_screenshots: HashMap<TabId, (String, bool, String)>,
     /// The workspace this window belongs to. Empty is the main one, which uses the
     /// browser's original profile; any other has a profile of its own on disk.
     workspace: String,
@@ -245,6 +246,8 @@ struct SavedData {
     workspace_tabs: Mutex<HashMap<String, String>>,
     /// The side panel's notes, to-dos and snippets, shared by every window.
     panel: Mutex<SidePanelData>,
+    /// Screenshots kept in the library, and the tags on everything in it.
+    library: Mutex<Library>,
 }
 
 fn saved_data() -> &'static SavedData {
@@ -289,6 +292,9 @@ fn saved_data() -> &'static SavedData {
             .map(|json| Workspaces::parse(&json))
             .unwrap_or_default();
         remove_forgotten_workspace_data(&workspaces);
+        let library = saved(SETTING_LIBRARY)
+            .map(|json| Library::parse(&json))
+            .unwrap_or_default();
         let panel = saved(SETTING_SIDE_PANEL)
             .map(|json| SidePanelData::parse(&json))
             .unwrap_or_default();
@@ -301,6 +307,7 @@ fn saved_data() -> &'static SavedData {
             workspaces: Mutex::new(workspaces),
             workspace_tabs: Mutex::default(),
             panel: Mutex::new(panel),
+            library: Mutex::new(library),
         }
     })
 }
@@ -2338,6 +2345,7 @@ fn run_command(shell: &SharedShell, command: UiCommand) {
         UiCommand::ToggleSplitView => toggle_split_view(shell),
         UiCommand::ToggleSidePanel => toggle_side_panel(shell),
         UiCommand::CommandBar => open_command_bar(shell),
+        UiCommand::OpenLibrary => open_page(shell, InternalPage::Library),
         // Only the side panel sends this, and it's handled where it arrives.
         UiCommand::SidePanelReady => {}
         UiCommand::SetNotes { text } => change_panel_data(|data| {
@@ -2621,10 +2629,76 @@ fn run_page_command(shell: &SharedShell, tab: TabId, frame: &Frame, command: Pag
             settings().search_engine = engine;
             with_storage(|storage| storage.set_setting(SETTING_SEARCH_ENGINE, engine.id()));
         }
+        PageCommand::ListLibrary { query, kind, tag } => reply(library_event(&query, &kind, &tag)),
+        PageCommand::SaveShotToLibrary {
+            png,
+            thumb,
+            title,
+            source,
+        } => {
+            let saved = save_shot_to_library(&png, &thumb, &title, &source);
+            reply(serde_json::json!({ "type": "libraryResult", "saved": saved }));
+        }
+        PageCommand::AddAssetTag { key, tag } => {
+            if asset_exists(&key) && library().add_tag(&key, &tag) {
+                save_library();
+            }
+            reply(library_event("", "", ""));
+        }
+        PageCommand::RemoveAssetTag { key, tag } => {
+            if library().remove_tag(&key, &tag) {
+                save_library();
+            }
+            reply(library_event("", "", ""));
+        }
+        PageCommand::DeleteAsset { key } => {
+            delete_asset(&key);
+            reply(library_event("", "", ""));
+        }
+        PageCommand::RenameShot { id, title } => {
+            if library().rename_shot(id, &title) {
+                save_library();
+            }
+            reply(library_event("", "", ""));
+        }
+        PageCommand::OpenLibraryShot { id } => {
+            let source = library()
+                .shots
+                .iter()
+                .find(|shot| shot.id == id)
+                .map(|shot| shot.source.clone());
+            let picture = source.as_ref().and_then(|_| {
+                shot_file(id, false)
+                    .and_then(|path| std::fs::read(path).ok())
+                    .map(|bytes| BASE64.encode(bytes))
+            });
+            if let (Some(data), Some(source)) = (picture, source) {
+                open_screenshot(shell, data, false, source);
+            }
+        }
+        PageCommand::OpenAsset { key } => {
+            let url = key
+                .strip_prefix("clip:")
+                .and_then(|id| id.parse::<u32>().ok())
+                .and_then(|id| panel_data().clip_url(id).map(str::to_owned))
+                .filter(|url| is_web_url(url));
+            if let Some(url) = url {
+                let id = create_tab(shell, &url);
+                attach_tab(shell, id);
+            }
+        }
+        PageCommand::ShowLibraryFolder => {
+            if let Some(folder) = library_dir() {
+                let _ = std::fs::create_dir_all(&folder);
+                show_in_folder(&folder);
+            }
+        }
         PageCommand::GetScreenshot => {
             let picture = lock(shell).pending_screenshots.remove(&tab);
-            if let Some((data, pick)) = picture {
-                reply(serde_json::json!({ "type": "screenshot", "data": data, "pick": pick }));
+            if let Some((data, pick, source)) = picture {
+                reply(
+                    serde_json::json!({ "type": "screenshot", "data": data, "pick": pick, "source": source }),
+                );
             }
         }
         PageCommand::SaveColor { hex } => {
@@ -4377,10 +4451,10 @@ fn take_screenshot(shell: &SharedShell, full: bool, pick: bool) {
             .active_id()
             .and_then(|id| guard.strip.get(id))
             .filter(|tab| is_web_url(&tab.page.url))
-            .map(|tab| tab.id)
+            .map(|tab| tab.page.url.clone())
     };
     let host = active_browser(shell).and_then(|browser| browser.host());
-    let (Some(_), Some(host)) = (page, host) else {
+    let (Some(source), Some(host)) = (page, host) else {
         toast(shell, "Only web pages can be captured");
         return;
     };
@@ -4393,7 +4467,7 @@ fn take_screenshot(shell: &SharedShell, full: bool, pick: bool) {
     let done = move |shell: &SharedShell, data: Option<String>| {
         DEV_TOOLS_WATCHES.with(|watches| watches.borrow_mut().remove(&watch));
         match data {
-            Some(data) => open_screenshot(shell, data, pick),
+            Some(data) => open_screenshot(shell, data, pick, source.clone()),
             None => toast(shell, "Couldn't capture this page"),
         }
     };
@@ -4486,10 +4560,183 @@ fn copy_png_to_clipboard(png: &[u8]) -> bool {
 }
 
 /// Opens a taken picture in a new tab. The tab's page asks for it when it has loaded.
-fn open_screenshot(shell: &SharedShell, data: String, pick: bool) {
+fn open_screenshot(shell: &SharedShell, data: String, pick: bool, source: String) {
     let id = create_tab(shell, internal_url(InternalPage::Screenshot));
-    lock(shell).pending_screenshots.insert(id, (data, pick));
+    lock(shell)
+        .pending_screenshots
+        .insert(id, (data, pick, source));
     attach_tab(shell, id);
+}
+
+// -- The library -----------------------------------------------------------------------
+
+const LIBRARY_PICTURE_MAX_BYTES: usize = 25 * 1024 * 1024;
+const LIBRARY_THUMB_MAX_BYTES: usize = 400 * 1024;
+/// How many screenshots' small pictures one search sends along with it.
+const LIBRARY_THUMBS_PER_SEARCH: usize = 60;
+const PNG_MARK: &[u8] = b"\x89PNG\r\n\x1a\n";
+
+fn library() -> MutexGuard<'static, Library> {
+    saved_data()
+        .library
+        .lock()
+        .expect("Failed to lock the library")
+}
+
+fn save_library() {
+    let json = library().to_json();
+    with_storage(|storage| storage.set_setting(SETTING_LIBRARY, &json));
+}
+
+fn library_dir() -> Option<PathBuf> {
+    data_dir().map(|folder| folder.join("Library"))
+}
+
+/// A kept screenshot's file, or its small copy. Named by number only, so nothing a page
+/// sends can pick a path.
+fn shot_file(id: u32, thumb: bool) -> Option<PathBuf> {
+    let name = if thumb {
+        format!("shot-{id}-small.png")
+    } else {
+        format!("shot-{id}.png")
+    };
+    library_dir().map(|folder| folder.join(name))
+}
+
+/// A PNG's width and height, from its header, if it is a PNG.
+fn png_size(png: &[u8]) -> Option<(u32, u32)> {
+    if png.len() < 24 || !png.starts_with(PNG_MARK) || &png[12..16] != b"IHDR" {
+        return None;
+    }
+    let number = |at: usize| u32::from_be_bytes([png[at], png[at + 1], png[at + 2], png[at + 3]]);
+    Some((number(16), number(20))).filter(|(width, height)| *width > 0 && *height > 0)
+}
+
+/// Keeps a screenshot: its picture and small copy as files, its details in the library.
+fn save_shot_to_library(png: &str, thumb: &str, title: &str, source: &str) -> bool {
+    let (Ok(png), Ok(thumb)) = (
+        BASE64.decode(png.as_bytes()),
+        BASE64.decode(thumb.as_bytes()),
+    ) else {
+        return false;
+    };
+    let Some((width, height)) = png_size(&png) else {
+        return false;
+    };
+    if png.len() > LIBRARY_PICTURE_MAX_BYTES
+        || thumb.len() > LIBRARY_THUMB_MAX_BYTES
+        || !thumb.starts_with(PNG_MARK)
+    {
+        return false;
+    }
+    let Some(folder) = library_dir() else {
+        return false;
+    };
+    if std::fs::create_dir_all(&folder).is_err() {
+        return false;
+    }
+    let Some(id) = library().add_shot(title, source, width, height, now_ms()) else {
+        return false;
+    };
+    let written = shot_file(id, false).is_some_and(|path| std::fs::write(path, &png).is_ok())
+        && shot_file(id, true).is_some_and(|path| std::fs::write(path, &thumb).is_ok());
+    if !written {
+        library().remove_shot(id);
+        return false;
+    }
+    save_library();
+    true
+}
+
+/// Whether the library has something under this key.
+fn asset_exists(key: &str) -> bool {
+    let panel = panel_data().clone();
+    library()
+        .assets(&panel)
+        .iter()
+        .any(|asset| asset.key == key)
+}
+
+/// Removes a kept thing: a screenshot and its files, or a clip, snippet or colour from
+/// the side panel.
+fn delete_asset(key: &str) {
+    if let Some(id) = key
+        .strip_prefix("shot:")
+        .and_then(|id| id.parse::<u32>().ok())
+    {
+        if library().remove_shot(id) {
+            for thumb in [false, true] {
+                if let Some(path) = shot_file(id, thumb) {
+                    let _ = std::fs::remove_file(path);
+                }
+            }
+            save_library();
+        }
+        return;
+    }
+    if let Some(id) = key
+        .strip_prefix("clip:")
+        .and_then(|id| id.parse::<u32>().ok())
+    {
+        change_panel_data(|data| data.remove_clip(id));
+    } else if let Some(id) = key
+        .strip_prefix("snippet:")
+        .and_then(|id| id.parse::<u32>().ok())
+    {
+        change_panel_data(|data| data.remove_snippet(id));
+    } else if let Some(hex) = key.strip_prefix("color:") {
+        change_panel_data(|data| data.remove_color(hex));
+    }
+    let panel = panel_data().clone();
+    library().prune(&panel);
+    save_library();
+}
+
+/// The library for the Library page: what matches the search, how many tags there are,
+/// and small pictures of the screenshots shown.
+fn library_event(query: &str, kind: &str, tag: &str) -> serde_json::Value {
+    let panel = panel_data().clone();
+    let (everything, pruned) = {
+        let mut library = library();
+        let before = library.tags.len();
+        library.prune(&panel);
+        (library.assets(&panel), library.tags.len() != before)
+    };
+    if pruned {
+        save_library();
+    }
+    let total = everything.len();
+    let tags = bridge::tag_counts(&everything);
+    let kind = AssetKind::from_id(kind);
+    let tag = (!tag.is_empty()).then_some(tag);
+    let found = bridge::search_assets(everything, query, kind, tag);
+    let matches = found.len();
+    let mut thumbs_left = LIBRARY_THUMBS_PER_SEARCH;
+    let items: Vec<serde_json::Value> = found
+        .into_iter()
+        .take(bridge::MAX_RESULTS)
+        .map(|asset| {
+            let thumb = asset
+                .shot_id
+                .filter(|_| thumbs_left > 0)
+                .and_then(|id| shot_file(id, true))
+                .and_then(|path| std::fs::read(path).ok())
+                .map(|bytes| {
+                    thumbs_left -= 1;
+                    format!("data:image/png;base64,{}", BASE64.encode(bytes))
+                });
+            let mut value = serde_json::to_value(&asset).unwrap_or_default();
+            value["thumb"] = thumb.into();
+            value
+        })
+        .collect();
+    serde_json::json!({
+        "type": "library",
+        "items": items,
+        "matches": matches,
+        "total": total,
+        "tags": tags,
+    })
 }
 
 // -- The side panel -------------------------------------------------------------------

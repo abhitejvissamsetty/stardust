@@ -57,6 +57,7 @@
       <div class="picked" id="picked" aria-label="Colours picked here"></div>
       <span class="spacer"></span>
       <span class="status" id="status" role="status"></span>
+      <button class="act" id="library" type="button" title="Keep this in the library">Save to library</button>
       <button class="act" id="copy" type="button">Copy</button>
       <button class="act primary" id="save" type="button">Save PNG</button>
     </div>
@@ -384,6 +385,28 @@
           say("Saving to Downloads");
         }, "image/png");
       });
+      // Keeping it in the library: the marked-up picture and a small copy of it for the
+      // library's grid, and the page it came from.
+      let source = "";
+      const toBase64 = (blob) => new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
+        reader.readAsDataURL(blob);
+      });
+      const toBlob = (canvasToSave) => new Promise((resolve) => canvasToSave.toBlob(resolve, "image/png"));
+      byId("library").addEventListener("click", async () => {
+        if (!image) return;
+        const full = exportCanvas();
+        const small = document.createElement("canvas");
+        const scale = Math.min(1, 360 / full.width);
+        small.width = Math.max(1, Math.round(full.width * scale));
+        small.height = Math.max(1, Math.round(full.height * scale));
+        small.getContext("2d").drawImage(full, 0, 0, small.width, small.height);
+        let name = "Screenshot";
+        try { name = `Screenshot of ${new URL(source).hostname.replace(/^www\./, "")}`; } catch (_) {}
+        send({ type: "saveShotToLibrary", png: await toBase64(await toBlob(full)), thumb: await toBase64(await toBlob(small)), title: name, source });
+      });
+
       // The browser puts the picture on the clipboard itself, since a data page can't use
       // the clipboard's own API and copying an image from a page only keeps its HTML.
       byId("copy").addEventListener("click", () => {
@@ -397,11 +420,16 @@
 
       // The browser sends the picture once, when asked.
       window.onBrowserEvent = (event) => {
+        if (event.type === "libraryResult") {
+          say(event.saved ? "Saved to the library" : "Couldn't save it to the library");
+          return;
+        }
         if (event.type === "copied") {
           say(event.ok ? "Copied" : "Copying a picture isn't available here yet. Use Save PNG.");
           return;
         }
         if (event.type !== "screenshot") return;
+        source = typeof event.source === "string" ? event.source : "";
         const loaded = new Image();
         loaded.onload = () => {
           image = loaded;

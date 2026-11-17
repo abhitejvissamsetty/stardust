@@ -107,6 +107,8 @@ pub enum UiCommand {
     ToggleSidePanel,
     /// Opens the command bar.
     CommandBar,
+    /// Opens the library page.
+    OpenLibrary,
     /// The side panel's page has loaded and can be sent what it shows.
     SidePanelReady,
     SetNotes {
@@ -231,6 +233,7 @@ impl UiCommand {
                 | Self::RemoveColor { .. }
                 | Self::PickColor
                 | Self::InspectText
+                | Self::OpenLibrary
         )
     }
 }

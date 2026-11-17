@@ -120,16 +120,19 @@ pub enum InternalPage {
     /// Shows one screenshot to mark up. It has nothing to show on its own, so it isn't
     /// brought back after a restart.
     Screenshot,
+    /// Everything kept: screenshots, clips, snippets and colours, with tags and search.
+    Library,
 }
 
 impl InternalPage {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::History,
         Self::Bookmarks,
         Self::Settings,
         Self::Downloads,
         Self::Extensions,
         Self::Screenshot,
+        Self::Library,
     ];
 
     /// Whether a saved tab on this page is reopened after a restart.
@@ -145,6 +148,7 @@ impl InternalPage {
             Self::Downloads => "browser://downloads",
             Self::Extensions => "browser://extensions",
             Self::Screenshot => "browser://screenshot",
+            Self::Library => "browser://library",
         }
     }
 
@@ -165,6 +169,44 @@ impl InternalPage {
 pub enum PageCommand {
     /// The screenshot page asks for the picture that was taken for it.
     GetScreenshot,
+    /// Searches the library. An empty kind or tag means any.
+    ListLibrary {
+        query: String,
+        kind: String,
+        tag: String,
+    },
+    /// Keeps a marked-up screenshot in the library: the picture and a small copy of it,
+    /// both as base64 PNG, with the page it was taken of.
+    SaveShotToLibrary {
+        png: String,
+        thumb: String,
+        title: String,
+        source: String,
+    },
+    AddAssetTag {
+        key: String,
+        tag: String,
+    },
+    RemoveAssetTag {
+        key: String,
+        tag: String,
+    },
+    DeleteAsset {
+        key: String,
+    },
+    RenameShot {
+        id: u32,
+        title: String,
+    },
+    /// Opens a kept screenshot in the editor again.
+    OpenLibraryShot {
+        id: u32,
+    },
+    /// Opens a clip's page in a new tab.
+    OpenAsset {
+        key: String,
+    },
+    ShowLibraryFolder,
     /// Keeps a colour picked from a screenshot, in the side panel's colours.
     SaveColor {
         hex: String,

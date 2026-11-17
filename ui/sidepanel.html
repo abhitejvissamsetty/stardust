@@ -112,6 +112,7 @@
     <section id="clips-section" role="tabpanel" hidden>
       <div class="row">
         <button class="primary" id="clip-page" type="button">Clip this page</button>
+        <button class="quiet" id="open-library" type="button">Open library</button>
         <button class="quiet" id="copy-clips" type="button">Copy all as Markdown</button>
       </div>
       <div class="list" id="clip-list"></div>
@@ -301,6 +302,7 @@
           .join("\n\n");
       }
       byId("clip-page").addEventListener("click", () => send({ type: "clipPage" }));
+      byId("open-library").addEventListener("click", () => send({ type: "openLibrary" }));
       byId("copy-clips").addEventListener("click", () => copy(markdown(), "clip-status"));
 
       // Colours -----------------------------------------------------------------

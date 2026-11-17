@@ -1,4 +1,4 @@
-# Milestone 6: workspaces, vertical tabs, split view, side panel, command bar, web clipper, screenshots, colour picker and the new icon
+# Milestone 6: workspaces, vertical tabs, split view, side panel, command bar, web clipper, screenshots, colour picker, asset library and the new icon
 
 Built and tested on macOS (Apple Silicon) on 2026-11-17. This is the first piece of Phase 1 of [creator-roadmap.md](creator-roadmap.md). Tested by driving the browser through Chromium's debugging protocol with real clicks, and by screenshots of Stardust's own pages. The native window frame wasn't looked at.
 
@@ -19,6 +19,7 @@ Built and tested on macOS (Apple Silicon) on 2026-11-17. This is the first piece
 | Web clipper: save pages and selected text to the side panel | **Done** and tested |
 | Screenshot and annotate | **Done** and tested on macOS |
 | Colour picker and font identifier | **Done** and tested on macOS |
+| Asset library: tags and search over everything kept | **Done** and tested on macOS |
 | Icon for Windows and Linux | **Not done**, see below |
 
 ## The icon
@@ -260,6 +261,38 @@ On macOS with real mouse events: the magnifier and its label, picking three colo
 - **Palettes from an image or a page,** contrast checking, and sharing colours with a design tool.
 - The font card in frames inside a page, and on pages that stop mouse events from reaching it.
 - **A keyboard shortcut.**
+
+## Asset library
+
+One page, `browser://library`, for everything a creator has kept: **screenshots, clips, snippets and colours**, with tags and search. Open it from the menu, the command bar, or "Open library" in the side panel's Clips tab.
+
+- **Screenshots join it** with a new **Save to library** button in the screenshot editor. It keeps the marked-up picture (cut to the crop) and a small copy of it for the grid, and remembers the page it was taken of. The files are in `Library/` inside Stardust's data folder as `shot-<number>.png` and `shot-<number>-small.png`, and "Open folder" shows them. Up to 200 screenshots, 25 MB each.
+- **The page:** a search box, filters (Everything, Screenshots, Clips, Snippets, Colours), a row of tags with how many things use each, and a grid of cards. A card shows a screenshot's picture, a clip's note, a snippet's text or a colour's swatch, its title and kind, its tags, and what you can do with it.
+- **Search:** every word you type must appear in the title, the saved text (a clip's address and note, a snippet's text, a colour's code, a screenshot's page) or a tag, in any case. Results are screenshots and clips newest first, then snippets and colours. It shows up to 120 at a time and says when it's hiding more.
+- **Tags:** type in a card's "+ tag" box and press Enter. They're lower case and tidied, up to 10 per thing and 30 characters. Click a tag at the top to show only what has it, and again to stop. A tag disappears when nothing uses it.
+- **Per card:** screenshots open in the editor again (the page they came from comes back with them), and can be renamed. Clips open their page in a new tab or copy their link, snippets copy their text, colours copy their code. **Delete** asks twice and removes the thing for good, including a screenshot's files, and from the side panel for the others.
+- **Shared** with the side panel: deleting a clip in the panel removes it here, and the reverse. Tags of things that are gone are cleaned up.
+
+### How it works
+
+- `crates/bridge/src/library.rs`: the screenshots' details, the tags, and the search, all with unit tests (tag tidying and limits, numbering, searching, kinds, counting, cleaning up, and checking saved data). Tags are kept by key (`clip:3`, `snippet:2`, `color:#FF8800`, `shot:1`) so the side panel's own data didn't change shape.
+- The host writes the files and answers searches. A screenshot's file name is made from its number alone, so a page can't choose a path. Saving checks the picture is a PNG, reads its size from its header, and caps both files' size.
+- The page is a `data:` page like Settings and sets everything it shows as text.
+
+### Tested
+
+On macOS, with real input: making a clip, a snippet and an annotated screenshot and saving it to the library (the two files appeared, 950 × 570), opening the page, searching, typing tags with Enter, filtering by a tag and by kind, renaming a screenshot, opening it in the editor again, and deleting a clip and a screenshot (its tag went with the clip, its files with the screenshot). The page was looked at in a screenshot.
+
+### Not tested or not built
+
+- **Colours in the page** were only covered by unit tests, not by hand.
+- **Moving, sorting by something other than newest, or choosing several things at once.** No bulk tagging or deleting.
+- **Folders and collections.** Tags only.
+- **Exporting the library,** other than "Open folder" for screenshots and the side panel's Markdown copy for clips.
+- **More than 200 screenshots** (the limit), and what happens to a very large library's speed.
+- **Screenshots from before** this existed: only ones saved with the new button are kept.
+- **Saving other things into it,** such as pictures from a page, and videos.
+- Windows and Linux.
 
 ## Tests
 

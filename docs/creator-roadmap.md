@@ -88,7 +88,7 @@ Build these as part of the browser. Many can be done with scripts the browser in
 | Web clipper to a folder of notes, Notion or Obsidian | Clippers | M | **First version built, see [milestone-6.md](milestone-6.md).** Markdown copy only; no folders, tags or direct export yet |
 | Thumbnail preview: how a title and image look in search and feeds | Part of vidIQ, TubeBuddy | M | |
 | Quick tools menu: resize, convert and compress an image or short video | Many small sites | M | |
-| Asset library: everything you've clipped, with tags and search | Folders of screenshots | L | |
+| Asset library: everything you've clipped, with tags and search | Folders of screenshots | L | **First version built, see [milestone-6.md](milestone-6.md).** Screenshots, clips, snippets, colours; tags and search. No folders, bulk actions or export yet |
 
 **Exit:** the beta creators drop at least two extensions each, because the built-in version is enough.
 

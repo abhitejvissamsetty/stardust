@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
+    <title>Library</title>
+    <style>
+      /*TOKENS*/
+      * { box-sizing: border-box; }
+      html, body { margin: 0; min-height: 100%; }
+      body { background: var(--page); color: var(--text); font: var(--text-md) var(--font-ui); }
+      button, input { font: inherit; }
+      main { margin: 0 auto; max-width: 1100px; padding: 28px 24px 60px; }
+      header { align-items: center; display: flex; gap: 12px; margin-bottom: 16px; }
+      h1 { flex: none; font-size: 22px; margin: 0; }
+      .search { background: var(--field); border: 1px solid transparent; border-radius: 8px; color: var(--text); flex: 1; height: 36px; outline: none; padding: 0 12px; }
+      .search:focus { background: var(--field-focus); border-color: var(--accent); }
+      .quiet { background: var(--field); border: 0; border-radius: 6px; color: var(--text); cursor: default; flex: none; height: 32px; padding: 0 12px; }
+      .quiet:hover { background: var(--press); }
+      .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+      .chip { background: transparent; border: 1px solid var(--divider); border-radius: 999px; color: var(--text-muted); cursor: default; height: 28px; padding: 0 12px; }
+      .chip:hover { background: var(--hover); }
+      .chip[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+      .chip .n { opacity: .65; margin-left: 4px; }
+      .count { color: var(--text-muted); font-size: var(--text-sm); margin: 6px 0 14px; }
+      .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); }
+      .card { background: var(--surface); border: 1px solid var(--divider); border-radius: 10px; display: flex; flex-direction: column; gap: 6px; overflow: hidden; padding: 0 0 10px; }
+      .preview { align-items: center; background: var(--field); border: 0; cursor: default; display: flex; height: 140px; justify-content: center; overflow: hidden; padding: 0; width: 100%; }
+      .preview img { display: block; height: 100%; object-fit: cover; width: 100%; }
+      .preview .swatch { height: 100%; width: 100%; }
+      .preview .text { color: var(--text-muted); font-size: 13px; line-height: 1.4; max-height: 100%; overflow: hidden; padding: 12px; text-align: left; white-space: pre-wrap; width: 100%; overflow-wrap: anywhere; }
+      .body { display: flex; flex-direction: column; gap: 4px; padding: 0 12px; }
+      .title { align-items: center; display: flex; gap: 6px; }
+      .title .name { flex: 1; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .kind { background: var(--field); border-radius: 4px; color: var(--text-muted); flex: none; font-size: 11px; padding: 1px 6px; text-transform: uppercase; }
+      .detail { color: var(--text-muted); font-size: 12px; overflow: hidden; overflow-wrap: anywhere; text-overflow: ellipsis; white-space: nowrap; }
+      .tags { display: flex; flex-wrap: wrap; gap: 4px; }
+      .tag { align-items: center; background: var(--accent-soft); border-radius: 999px; color: var(--accent); display: inline-flex; font-size: 12px; gap: 4px; padding: 1px 4px 1px 9px; }
+      .tag button { background: transparent; border: 0; border-radius: 50%; color: inherit; cursor: default; height: 16px; line-height: 1; padding: 0; width: 16px; }
+      .tag button:hover { background: var(--press); }
+      .tag-input { background: transparent; border: 1px dashed var(--divider); border-radius: 999px; color: var(--text); font-size: 12px; height: 22px; outline: none; padding: 0 8px; width: 92px; }
+      .tag-input:focus { border-color: var(--accent); }
+      .actions { display: flex; gap: 6px; }
+      .actions .quiet { font-size: 12px; height: 26px; padding: 0 9px; }
+      .danger:hover { background: var(--warn-bg); color: var(--warn-text); }
+      .empty { color: var(--text-muted); padding: 60px 20px; text-align: center; }
+      .status { color: var(--text-muted); font-size: var(--text-sm); min-height: 18px; }
+      [hidden] { display: none !important; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Library</h1>
+        <input class="search" id="search" type="search" placeholder="Search everything you've kept" aria-label="Search the library" autocomplete="off" />
+        <button class="quiet" id="folder" type="button" title="Show the folder that holds saved screenshots">Open folder</button>
+      </header>
+      <div class="chips" id="kinds" role="group" aria-label="Show"></div>
+      <div class="chips" id="tags" role="group" aria-label="Tags"></div>
+      <div class="count" id="count" role="status"></div>
+      <div class="grid" id="grid"></div>
+      <div class="empty" id="empty" hidden></div>
+      <div class="status" id="status" role="status"></div>
+    </main>
+    <script>
+      "use strict";
+      const send = (command) => window.browserBridge.send(JSON.stringify(command));
+      const byId = (id) => document.getElementById(id);
+      const make = (tag, className, text) => {
+        const element = document.createElement(tag);
+        if (className) element.className = className;
+        if (text !== undefined) element.textContent = text;
+        return element;
+      };
+
+      const KINDS = [["", "Everything"], ["screenshot", "Screenshots"], ["clip", "Clips"], ["snippet", "Snippets"], ["color", "Colours"]];
+      const LABEL = { screenshot: "Screenshot", clip: "Clip", snippet: "Snippet", color: "Colour" };
+      let kind = "";
+      let tag = "";
+      let searchTimer = null;
+      let latest = { items: [], tags: [], matches: 0, total: 0 };
+      // A tag being typed isn't thrown away when the list refreshes.
+      let typing = { key: null, text: "" };
+
+      function ask() {
+        send({ type: "listLibrary", query: byId("search").value, kind, tag });
+      }
+      byId("search").addEventListener("input", () => {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(ask, 150);
+      });
+      byId("folder").addEventListener("click", () => send({ type: "showLibraryFolder" }));
+
+      function chip(label, pressed, onClick, count) {
+        const button = make("button", "chip", label);
+        button.type = "button";
+        button.setAttribute("aria-pressed", String(pressed));
+        if (count !== undefined) button.append(make("span", "n", String(count)));
+        button.addEventListener("click", onClick);
+        return button;
+      }
+      function renderFilters() {
+        byId("kinds").replaceChildren(...KINDS.map(([id, label]) => chip(label, kind === id, () => { kind = id; ask(); })));
+        const tags = latest.tags.map(([name, count]) => chip(`#${name}`, tag === name, () => { tag = tag === name ? "" : name; ask(); }, count));
+        byId("tags").replaceChildren(...tags);
+        byId("tags").hidden = tags.length === 0;
+      }
+
+      function copy(text, label) {
+        const field = Object.assign(document.createElement("textarea"), { value: text });
+        field.style.cssText = "position:fixed;opacity:0;";
+        document.body.append(field);
+        field.select();
+        let copied = false;
+        try { copied = document.execCommand("copy"); } catch (_) {}
+        field.remove();
+        say(copied ? `Copied ${label}` : "Couldn't copy");
+      }
+      function say(text) {
+        byId("status").textContent = text;
+        clearTimeout(say.timer);
+        say.timer = setTimeout(() => (byId("status").textContent = ""), 2200);
+      }
+
+      function card(item) {
+        const element = make("article", "card");
+        // What the preview does when clicked: open the thing.
+        const preview = make("button", "preview");
+        preview.type = "button";
+        if (item.kind === "screenshot") {
+          if (item.thumb) {
+            const image = make("img");
+            image.alt = "";
+            image.src = item.thumb;
+            preview.append(image);
+          } else {
+            preview.append(make("div", "text", "Screenshot"));
+          }
+          preview.title = "Open to mark up again";
+          preview.addEventListener("click", () => send({ type: "openLibraryShot", id: item.shotId }));
+        } else if (item.kind === "color") {
+          const swatch = make("div", "swatch");
+          swatch.style.background = item.title;
+          preview.append(swatch);
+          preview.title = "Copy";
+          preview.addEventListener("click", () => copy(item.title, item.title));
+        } else if (item.kind === "clip") {
+          preview.append(make("div", "text", item.detail.split("\n").slice(1).join("\n") || item.detail));
+          preview.title = "Open the page";
+          preview.addEventListener("click", () => send({ type: "openAsset", key: item.key }));
+        } else {
+          preview.append(make("div", "text", item.detail));
+          preview.title = "Copy the text";
+          preview.addEventListener("click", () => copy(item.detail, "the text"));
+        }
+        const body = make("div", "body");
+        const title = make("div", "title");
+        title.append(make("span", "name", item.title), make("span", "kind", LABEL[item.kind]));
+        body.append(title);
+        const detail = item.kind === "screenshot"
+          ? `${item.width} × ${item.height}${item.detail ? " · " + item.detail : ""}`
+          : item.kind === "clip" ? item.detail.split("\n")[0] : "";
+        if (detail) body.append(make("div", "detail", detail));
+
+        const tags = make("div", "tags");
+        for (const name of item.tags) {
+          const pill = make("span", "tag", name);
+          const remove = make("button", "", "×");
+          remove.title = `Remove the tag ${name}`;
+          remove.setAttribute("aria-label", `Remove the tag ${name}`);
+          remove.addEventListener("click", () => { send({ type: "removeAssetTag", key: item.key, tag: name }); setTimeout(ask, 60); });
+          pill.append(remove);
+          tags.append(pill);
+        }
+        const input = make("input", "tag-input");
+        input.type = "text";
+        input.maxLength = 30;
+        input.placeholder = "+ tag";
+        input.setAttribute("aria-label", `Add a tag to ${item.title}`);
+        if (typing.key === item.key) input.value = typing.text;
+        input.addEventListener("input", () => (typing = { key: item.key, text: input.value }));
+        input.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" && input.value.trim()) {
+            send({ type: "addAssetTag", key: item.key, tag: input.value });
+            typing = { key: null, text: "" };
+            input.value = "";
+            setTimeout(ask, 60);
+          }
+        });
+        tags.append(input);
+        body.append(tags);
+
+        const actions = make("div", "actions");
+        if (item.kind === "screenshot") {
+          const rename = make("button", "quiet", "Rename");
+          rename.addEventListener("click", () => {
+            const name = make("input", "tag-input");
+            name.type = "text";
+            name.maxLength = 100;
+            name.value = item.title;
+            name.style.width = "100%";
+            name.setAttribute("aria-label", "Screenshot name");
+            title.replaceChildren(name);
+            name.focus();
+            name.select();
+            name.addEventListener("keydown", (event) => {
+              if (event.key === "Enter") { send({ type: "renameShot", id: item.shotId, title: name.value }); setTimeout(ask, 60); }
+              if (event.key === "Escape") ask();
+            });
+          });
+          actions.append(rename);
+        } else if (item.kind === "clip") {
+          const open = make("button", "quiet", "Open");
+          open.addEventListener("click", () => send({ type: "openAsset", key: item.key }));
+          const link = make("button", "quiet", "Copy link");
+          link.addEventListener("click", () => copy(item.detail.split("\n")[0], "the link"));
+          actions.append(open, link);
+        } else if (item.kind === "snippet") {
+          const text = make("button", "quiet", "Copy");
+          text.addEventListener("click", () => copy(item.detail, "the text"));
+          actions.append(text);
+        } else {
+          const code = make("button", "quiet", "Copy");
+          code.addEventListener("click", () => copy(item.title, item.title));
+          actions.append(code);
+        }
+        let asked = false;
+        const remove = make("button", "quiet danger", "Delete");
+        remove.addEventListener("click", () => {
+          if (!asked) {
+            asked = true;
+            remove.textContent = "Click again to delete";
+            setTimeout(() => { asked = false; remove.textContent = "Delete"; }, 3500);
+            return;
+          }
+          send({ type: "deleteAsset", key: item.key });
+        });
+        actions.append(remove);
+        body.append(actions);
+        element.append(preview, body);
+        return element;
+      }
+
+      function render() {
+        renderFilters();
+        byId("grid").replaceChildren(...latest.items.map(card));
+        const searching = byId("search").value.trim() || kind || tag;
+        byId("count").textContent = latest.total === 0
+          ? ""
+          : latest.matches > latest.items.length
+            ? `Showing ${latest.items.length} of ${latest.matches}. Narrow the search to see the rest.`
+            : `${latest.matches} ${latest.matches === 1 ? "thing" : "things"}${searching ? " match" : " kept"}`;
+        const empty = byId("empty");
+        empty.hidden = latest.items.length > 0;
+        empty.textContent = latest.total === 0
+          ? "Nothing here yet. Clips, snippets and colours from the side panel appear here, and so do screenshots you save to the library."
+          : "Nothing matches. Try fewer words, or clear the filters.";
+      }
+
+      window.onBrowserEvent = (event) => {
+        if (event.type === "library") {
+          latest = event;
+          // A tag filter for a tag that's gone is dropped.
+          if (tag && !event.tags.some(([name]) => name === tag)) { tag = ""; ask(); return; }
+          render();
+        }
+      };
+      ask();
+    </script>
+  </body>
+</html>
