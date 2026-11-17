@@ -13,9 +13,9 @@ use bridge::{
     DownloadList, DownloadState, ExtensionSource, InternalPage, KeyPress, LoadedTab, PageCommand,
     Permission, SavedWindows, SearchEngine, Session, SessionTab, Settings, Shortcut,
     SitePermissions, StartupMode, SubmittedLogin, TabHistory, TabId, TabStrip, UiCommand, UiEvent,
-    WindowAction, describe, error_page, is_risky_file, is_web_url, level_for_percent, login_origin,
-    next_zoom_percent, normalize_homepage, percent_for_level, resolve_input, safe_file_name,
-    shortcut_for, site_origin,
+    WindowAction, Workspaces, describe, error_page, is_risky_file, is_web_url, level_for_percent,
+    login_origin, next_zoom_percent, normalize_homepage, percent_for_level, resolve_input,
+    safe_file_name, shortcut_for, site_origin,
     storage_types::{FolderItems, SuggestionItem},
     tabs_to_discard, unique_path,
 };
@@ -24,7 +24,7 @@ use cef::*;
 use storage::{DownloadRecord, Storage};
 
 use crate::{
-    app::open_window,
+    app::{open_window, open_window_in},
     data_dir, passwords,
     render::{FILL_LOGIN_MESSAGE, LOGIN_SUBMITTED_MESSAGE, UI_COMMAND_MESSAGE},
     ui::{MENU_FRAME_NAME, internal_page_for_url, internal_url, toolbar_url},
@@ -55,6 +55,9 @@ const SETTING_SAVE_MEMORY: &str = "save_memory";
 const CLEAR_ORIGIN_LIMIT: u32 = 2000;
 const SETTING_SITE_PERMISSIONS: &str = "site_permissions";
 const SETTING_EXTENSIONS: &str = "extensions";
+const SETTING_WORKSPACES: &str = "workspaces";
+/// Each workspace's open tabs are saved under this, then its id.
+const WORKSPACE_TABS_PREFIX: &str = "workspace_tabs_";
 /// Extensions waiting for the person to agree to them. More than this drops the oldest.
 const PENDING_EXTENSION_LIMIT: usize = 3;
 const MEDIA_AUDIO: u32 =
@@ -136,6 +139,9 @@ pub struct Shell {
     /// A private window. Its pages use a profile that lives in memory, and nothing it
     /// does is saved: no history, session, downloads list or passwords.
     private: bool,
+    /// The workspace this window belongs to. Empty is the main one, which uses the
+    /// browser's original profile; any other has a profile of its own on disk.
+    workspace: String,
     request_context: Option<RequestContext>,
     /// Page icons already fetched for this window, by address, and those being fetched.
     favicons: HashMap<String, String>,
@@ -200,6 +206,9 @@ struct SavedData {
     session: Mutex<String>,
     permissions: Mutex<SitePermissions>,
     extensions: Mutex<extensions::Registry>,
+    workspaces: Mutex<Workspaces>,
+    /// Each workspace's tabs as last saved, to avoid rewriting what didn't change.
+    workspace_tabs: Mutex<HashMap<String, String>>,
 }
 
 fn saved_data() -> &'static SavedData {
@@ -238,12 +247,18 @@ fn saved_data() -> &'static SavedData {
         let extensions = saved(SETTING_EXTENSIONS)
             .map(|json| extensions::Registry::parse(&json))
             .unwrap_or_default();
+        let workspaces = saved(SETTING_WORKSPACES)
+            .map(|json| Workspaces::parse(&json))
+            .unwrap_or_default();
+        remove_forgotten_workspace_data(&workspaces);
         SavedData {
             storage: storage.map(Mutex::new),
             settings: Mutex::new(settings),
             session: Mutex::default(),
             permissions: Mutex::new(permissions),
             extensions: Mutex::new(extensions),
+            workspaces: Mutex::new(workspaces),
+            workspace_tabs: Mutex::default(),
         }
     })
 }
@@ -581,10 +596,182 @@ pub fn make_private(shell: &SharedShell) {
     guard.request_context = context;
 }
 
-/// A title for the window's frame, which says when it's private.
+fn workspace_list() -> MutexGuard<'static, Workspaces> {
+    saved_data()
+        .workspaces
+        .lock()
+        .expect("Failed to lock the workspaces list")
+}
+
+fn save_workspace_list() {
+    let json = workspace_list().to_json();
+    with_storage(|storage| storage.set_setting(SETTING_WORKSPACES, &json));
+}
+
+/// A workspace's profile folder. CEF only accepts a profile that's a direct child of the
+/// data folder, like `Default`; one nested deeper silently becomes a memory-only profile.
+const WORKSPACE_FOLDER_PREFIX: &str = "Workspace-";
+
+fn workspace_folder(id: &str) -> Option<PathBuf> {
+    bridge::is_workspace_id(id)
+        .then(|| data_dir().map(|folder| folder.join(format!("{WORKSPACE_FOLDER_PREFIX}{id}"))))
+        .flatten()
+}
+
+/// Deletes the data of workspaces that were removed. Done at start-up, when nothing has
+/// those folders open.
+fn remove_forgotten_workspace_data(list: &Workspaces) {
+    let Some(entries) = data_dir().and_then(|folder| std::fs::read_dir(folder).ok()) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        // Only folders named exactly like a workspace's are ever touched.
+        let Some(id) = name.strip_prefix(WORKSPACE_FOLDER_PREFIX) else {
+            continue;
+        };
+        if bridge::is_workspace_id(id) && !list.items().iter().any(|item| item.id == id) {
+            let _ = std::fs::remove_dir_all(entry.path());
+        }
+    }
+}
+
+/// Gives a window the profile of a workspace: its own cookies, logins and site storage,
+/// kept on disk. Call before its tabs are created, and make them only once `handler` says
+/// the profile is ready. Returns false, changing nothing, for the main workspace or an
+/// unknown one.
+pub fn make_workspace(
+    shell: &SharedShell,
+    id: &str,
+    handler: Option<&mut RequestContextHandler>,
+) -> bool {
+    if id.is_empty() || !workspace_list().exists(id) {
+        return false;
+    }
+    let Some(path) = workspace_folder(id) else {
+        return false;
+    };
+    let settings = RequestContextSettings {
+        cache_path: CefString::from(path.to_string_lossy().as_ref()),
+        persist_session_cookies: 1,
+        ..Default::default()
+    };
+    let Some(context) = request_context_create_context(Some(&settings), handler) else {
+        return false;
+    };
+    let mut guard = lock(shell);
+    guard.workspace = id.to_owned();
+    guard.request_context = Some(context);
+    true
+}
+
+fn workspace_of(shell: &SharedShell) -> String {
+    lock(shell).workspace.clone()
+}
+
+/// Every workspace with its colour, and whether a window of it is open.
+fn workspace_items() -> Vec<serde_json::Value> {
+    let saved: Vec<_> = workspace_list().items().to_vec();
+    let open: HashSet<String> = open_windows()
+        .iter()
+        .filter_map(|shell| {
+            let guard = lock(shell);
+            (!guard.private && !guard.window_closing).then(|| guard.workspace.clone())
+        })
+        .collect();
+    let mut items = vec![serde_json::json!({
+        "id": "",
+        "name": bridge::MAIN_NAME,
+        "color": bridge::MAIN_COLOR,
+        "main": true,
+        "open": open.contains(""),
+    })];
+    items.extend(saved.iter().map(|item| {
+        serde_json::json!({
+            "id": item.id,
+            "name": item.name,
+            "color": item.color,
+            "main": false,
+            "open": open.contains(&item.id),
+        })
+    }));
+    items
+}
+
+fn publish_workspaces(shell: &SharedShell) {
+    let (toolbar, current) = {
+        let guard = lock(shell);
+        (
+            guard.toolbar.clone().filter(|_| guard.toolbar_ready),
+            guard.workspace.clone(),
+        )
+    };
+    let items = workspace_items();
+    send_to_toolbar(
+        toolbar.as_ref(),
+        &UiEvent::Workspaces {
+            items: &items,
+            current: &current,
+        },
+    );
+}
+
+fn publish_workspaces_everywhere() {
+    for shell in open_windows() {
+        publish_workspaces(&shell);
+    }
+}
+
+/// Shows a workspace's window if one is open, and otherwise opens one with the tabs the
+/// workspace had when it was last used.
+fn open_workspace(id: &str) {
+    if !workspace_list().exists(id) {
+        return;
+    }
+    let existing = open_windows().into_iter().find(|shell| {
+        let guard = lock(shell);
+        !guard.private && !guard.window_closing && guard.workspace == id
+    });
+    if let Some(shell) = existing {
+        let window = lock(&shell).window.clone();
+        if let Some(window) = window {
+            window.activate();
+        }
+        return;
+    }
+    let key = format!("{WORKSPACE_TABS_PREFIX}{id}");
+    let saved = with_storage(|storage| storage.setting(&key))
+        .flatten()
+        .and_then(|json| SavedWindows::parse(&json).windows.into_iter().next())
+        .filter(|session| !session.tabs.is_empty());
+    match saved {
+        Some(session) => open_window_in(Some(session), &[], false, id),
+        None => open_window_in(None, &[BLANK_PAGE.to_owned()], false, id),
+    }
+}
+
+/// The answer to a page asking for the workspaces, with an explanation if what it just
+/// asked for wasn't allowed.
+fn workspaces_event(error: Option<&str>) -> serde_json::Value {
+    serde_json::json!({ "type": "workspaces", "items": workspace_items(), "error": error })
+}
+
+/// A title for the window's frame, which says when it's private or in another workspace.
 fn window_title(shell: &SharedShell, title: &str) -> String {
-    if !is_private(shell) {
-        return title.to_owned();
+    let (private, workspace) = {
+        let guard = lock(shell);
+        (guard.private, guard.workspace.clone())
+    };
+    if !private {
+        if workspace.is_empty() {
+            return title.to_owned();
+        }
+        let (name, _) = workspace_list().display(&workspace);
+        return if title.is_empty() {
+            name
+        } else {
+            format!("{title} \u{2014} {name}")
+        };
     }
     if title.is_empty() {
         "Private window".to_owned()
@@ -604,18 +791,45 @@ fn save_session() {
         .filter_map(|shell| {
             let shell = lock(shell);
             // Private windows leave nothing behind, not even their tabs.
-            (!shell.window_closing && !shell.private).then(|| Session::from_strip(&shell.strip))
+            (!shell.window_closing && !shell.private).then(|| Session {
+                workspace: shell.workspace.clone(),
+                ..Session::from_strip(&shell.strip)
+            })
         })
         .collect();
     if windows.is_empty() {
         return;
     }
+    save_workspace_tabs(&windows);
     let saved = SavedWindows { windows };
     let json = serde_json::to_string(&saved).expect("Failed to serialize session");
     let mut last = saved_data().session.lock().expect("Failed to lock session");
     if *last != json {
         with_storage(|storage| storage.set_setting(SETTING_SESSION, &json));
         *last = json;
+    }
+}
+
+/// Keeps each workspace's tabs, so opening it later brings back where it was left. A
+/// workspace's tabs aren't dropped when its window closes.
+fn save_workspace_tabs(windows: &[Session]) {
+    for session in windows
+        .iter()
+        .filter(|session| !session.workspace.is_empty())
+    {
+        let json = serde_json::to_string(&SavedWindows {
+            windows: vec![session.clone()],
+        })
+        .expect("Failed to serialize workspace tabs");
+        let mut last = saved_data()
+            .workspace_tabs
+            .lock()
+            .expect("Failed to lock workspace tabs");
+        if last.get(&session.workspace) != Some(&json) {
+            let key = format!("{WORKSPACE_TABS_PREFIX}{}", session.workspace);
+            with_storage(|storage| storage.set_setting(&key, &json));
+            last.insert(session.workspace.clone(), json);
+        }
     }
 }
 
@@ -1396,10 +1610,9 @@ fn move_tab(source: &SharedShell, id: TabId, target: Option<SharedShell>) {
     }
     // A tab can't cross between private and ordinary windows, which would put what a
     // private window keeps in memory into one that saves it, or the other way round.
-    if target
-        .as_ref()
-        .is_some_and(|target| is_private(target) != is_private(source))
-    {
+    if target.as_ref().is_some_and(|target| {
+        is_private(target) != is_private(source) || workspace_of(target) != workspace_of(source)
+    }) {
         return;
     }
     let saved = SessionTab {
@@ -1421,6 +1634,7 @@ fn move_tab(source: &SharedShell, id: TabId, target: Option<SharedShell>) {
             Some(Session {
                 tabs: vec![saved],
                 active: 0,
+                workspace: workspace_of(source),
             }),
             &[],
             is_private(source),
@@ -1869,6 +2083,7 @@ fn run_command(shell: &SharedShell, command: UiCommand) {
             publish_downloads(shell);
             publish_bookmarks_bar();
             publish_extensions(shell);
+            publish_workspaces(shell);
             send_known_favicons(shell);
             // A new window's first tab was shown before its toolbar could take focus.
             let is_blank = lock(shell)
@@ -1970,8 +2185,14 @@ fn run_command(shell: &SharedShell, command: UiCommand) {
         UiCommand::FillLogin => fill_login(shell),
         UiCommand::WindowAction { action } => window_action(shell, action),
         UiCommand::GetWindowState => publish_window_state(shell),
-        UiCommand::NewWindow => open_window(None, &[BLANK_PAGE.to_owned()], is_private(shell)),
+        UiCommand::NewWindow => open_window_in(
+            None,
+            &[BLANK_PAGE.to_owned()],
+            is_private(shell),
+            &workspace_of(shell),
+        ),
         UiCommand::NewPrivateWindow => open_window(None, &[BLANK_PAGE.to_owned()], true),
+        UiCommand::OpenWorkspace { id } => open_workspace(&id),
         UiCommand::OpenFind => open_find(shell),
         UiCommand::Quit => close_all_browsers(),
         UiCommand::ReopenClosedTab => reopen_closed_tab(shell),
@@ -2223,6 +2444,53 @@ fn run_page_command(shell: &SharedShell, frame: &Frame, command: PageCommand) {
             settings().search_engine = engine;
             with_storage(|storage| storage.set_setting(SETTING_SEARCH_ENGINE, engine.id()));
         }
+        PageCommand::ListWorkspaces => reply(workspaces_event(None)),
+        PageCommand::CreateWorkspace { name, color } => {
+            let result = workspace_list().create(&name, &color);
+            if result.is_ok() {
+                save_workspace_list();
+                publish_workspaces_everywhere();
+            }
+            reply(workspaces_event(result.err()));
+        }
+        PageCommand::RenameWorkspace { id, name } => {
+            let result = workspace_list().rename(&id, &name);
+            if result.is_ok() {
+                save_workspace_list();
+                publish_workspaces_everywhere();
+            }
+            reply(workspaces_event(result.err()));
+        }
+        PageCommand::SetWorkspaceColor { id, color } => {
+            if workspace_list().set_color(&id, &color) {
+                save_workspace_list();
+                publish_workspaces_everywhere();
+            }
+            reply(workspaces_event(None));
+        }
+        PageCommand::DeleteWorkspace { id } => {
+            let in_use = open_windows()
+                .iter()
+                .any(|window| lock(window).workspace == id);
+            let error = if in_use {
+                Some("Close that workspace's windows first.")
+            } else if workspace_list().remove(&id) {
+                save_workspace_list();
+                let key = format!("{WORKSPACE_TABS_PREFIX}{id}");
+                with_storage(|storage| storage.set_setting(&key, ""));
+                saved_data()
+                    .workspace_tabs
+                    .lock()
+                    .expect("Failed to lock workspace tabs")
+                    .remove(&id);
+                publish_workspaces_everywhere();
+                None
+            } else {
+                Some("That workspace doesn't exist.")
+            };
+            reply(workspaces_event(error));
+        }
+        PageCommand::OpenWorkspace { id } => open_workspace(&id),
         PageCommand::ListExtensions => reply(extensions_event()),
         PageCommand::ChooseExtension { source } => choose_extension(frame, source),
         PageCommand::CancelInstallExtension { token } => {
@@ -2415,7 +2683,12 @@ fn run_shortcut(shell: &SharedShell, event: &KeyEvent) -> bool {
         Shortcut::Bookmarks => open_page(shell, InternalPage::Bookmarks),
         Shortcut::Settings => open_page(shell, InternalPage::Settings),
         Shortcut::Quit => close_all_browsers(),
-        Shortcut::NewWindow => open_window(None, &[BLANK_PAGE.to_owned()], is_private(shell)),
+        Shortcut::NewWindow => open_window_in(
+            None,
+            &[BLANK_PAGE.to_owned()],
+            is_private(shell),
+            &workspace_of(shell),
+        ),
         Shortcut::NewPrivateWindow => open_window(None, &[BLANK_PAGE.to_owned()], true),
         Shortcut::ReopenClosedTab => reopen_closed_tab(shell),
         Shortcut::ZoomIn => change_zoom(shell, Some(true)),
@@ -3860,24 +4133,24 @@ fn extension_items() -> Vec<serde_json::Value> {
 }
 
 fn publish_extensions(shell: &SharedShell) {
-    let (toolbar, private) = {
+    let (toolbar, available) = {
         let shell = lock(shell);
         (
             shell.toolbar.clone().filter(|_| shell.toolbar_ready),
-            shell.private,
+            !shell.private && shell.workspace.is_empty(),
         )
     };
-    // Private windows don't run extensions, so they get none.
-    let items = if private {
-        Vec::new()
-    } else {
+    // Private windows and other workspaces don't run extensions, so they get none.
+    let items = if available {
         extension_items()
+    } else {
+        Vec::new()
     };
     send_to_toolbar(
         toolbar.as_ref(),
         &UiEvent::Extensions {
             items: &items,
-            available: !private,
+            available,
         },
     );
 }
@@ -3907,11 +4180,11 @@ fn open_extension_popup(shell: &SharedShell, id: &str, left: i32, top: i32) {
         (
             guard.window.clone(),
             guard.ext_popup_id.as_deref() == Some(id),
-            guard.private,
+            guard.private || !guard.workspace.is_empty(),
         )
     };
     hide_extension_popup(shell);
-    // Private windows don't run extensions.
+    // Private windows and other workspaces don't run extensions.
     let (Some(window), false, false) = (window, same, private) else {
         return;
     };

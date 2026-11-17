@@ -18,6 +18,23 @@
         </div>
       </header>
 
+      <section class="card" id="workspaces-card">
+        <h2>Workspaces</h2>
+        <p class="hint card-hint">Each workspace keeps its own logins, cookies and open tabs, so you can stay signed in to a different account in each, such as one per channel. History, bookmarks, saved passwords and extensions are shared, and extensions only run in Personal. Deleting a workspace erases its logins and cookies the next time Stardust starts.</p>
+        <div id="workspace-list"></div>
+        <div class="setting">
+          <div class="setting-text">
+            <label class="setting-title" for="new-workspace">New workspace</label>
+            <span class="hint" id="workspace-hint"></span>
+          </div>
+          <div class="inline-form">
+            <input id="new-workspace" type="text" maxlength="40" placeholder="Name" class="wide-input" autocomplete="off" />
+            <select id="new-workspace-color" aria-label="Colour"></select>
+            <button id="create-workspace" class="quiet-button" type="button">Create</button>
+          </div>
+        </div>
+      </section>
+
       <section class="card">
         <h2>General</h2>
         <div class="setting">

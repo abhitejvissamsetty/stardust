@@ -104,5 +104,16 @@ fn bundle(output: &Path, _release: bool) -> PathBuf {
             .expect("failed to run plutil");
         assert!(status.success(), "failed to set {key}");
     }
+    // The app icon: Finder and the Dock read it from Resources.
+    let icon = Path::new(env!("CARGO_MANIFEST_DIR")).join("../assets/icon/stardust.icns");
+    let resources = app.join("Contents/Resources");
+    std::fs::create_dir_all(&resources).expect("failed to make Resources");
+    std::fs::copy(&icon, resources.join("stardust.icns")).expect("failed to copy the icon");
+    let status = std::process::Command::new("plutil")
+        .args(["-replace", "CFBundleIconFile", "-string", "stardust"])
+        .arg(&plist)
+        .status()
+        .expect("failed to run plutil");
+    assert!(status.success(), "failed to set CFBundleIconFile");
     app
 }

@@ -49,7 +49,7 @@ Writers, designers, streamers and social managers share most of the workspace fe
 | Play H.264 and AAC | Without it, much of a creator's video work fails | L | Legal advice on patents; a build server for custom CEF. Two approaches are laid out in remaining-work.md |
 | Screen and window capture, with a picker | Needed for any recorder, and for sharing a screen on calls | L | Research first: how much CEF supports, and whether a custom picker is needed |
 | Web notifications | Studio, Slack, Discord, email | M | Research first: CEF's Alloy style can't show them natively |
-| Multiple profiles | Separate accounts per channel or brand, each with its own cookies and logins | L | Reuses the in-memory profile mechanism from private windows, but on disk |
+| Multiple profiles | Separate accounts per channel or brand, each with its own cookies and logins | L | **Built as workspaces, see [milestone-6.md](milestone-6.md).** Saved passwords still shared |
 | Run it on Windows, then ship Windows builds | Most creators on Windows have never been able to try it | L | A Windows machine or CI |
 | Release server, a real signing key, macOS signing and notarization | People can install it, and it updates itself | M | Decisions in remaining-work.md |
 | Large uploads and drag-and-drop | Creators upload multi-gigabyte files constantly | S | Test, then fix what breaks |
@@ -63,7 +63,7 @@ Writers, designers, streamers and social managers share most of the workspace fe
 
 | Item | Why | Size | Depends on |
 |---|---|---|---|
-| Workspaces: a named set of tabs, with its own profile, switchable in one click | The core idea: one workspace per channel or project | L | Profiles |
+| Workspaces: a named set of tabs, with its own profile, switchable in one click | The core idea: one workspace per channel or project | L | **First version built, see [milestone-6.md](milestone-6.md).** Passwords and extensions aren't separated yet |
 | Vertical tab sidebar, with groups and search | Dozens of tabs per project | M | Our own tab strip |
 | Split view: two pages side by side | Research next to a script or a dashboard | M | Window layout |
 | Side panel: notes, a to-do list and a clipboard of snippets, beside any page | Work without leaving the page | M | Window layout |

@@ -662,3 +662,20 @@ main.wide {
 [hidden] {
   display: none !important;
 }
+
+/* Workspaces card in Settings. */
+.card-hint { margin: 0 0 var(--space-3); }
+.workspace-row { gap: var(--space-2); }
+.workspace-row .workspace-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-row .wide-input { flex: 1; min-width: 0; }
+.ws-dot { background: var(--ws-blue); border-radius: 999px; flex: none; height: 12px; width: 12px; }
+.ws-dot[data-color="green"] { background: var(--ws-green); }
+.ws-dot[data-color="red"] { background: var(--ws-red); }
+.ws-dot[data-color="amber"] { background: var(--ws-amber); }
+.ws-dot[data-color="purple"] { background: var(--ws-purple); }
+.ws-dot[data-color="pink"] { background: var(--ws-pink); }
+.ws-dot[data-color="teal"] { background: var(--ws-teal); }
+.ws-dot[data-color="gray"] { background: var(--ws-gray); }
+.inline-form { align-items: center; display: flex; gap: var(--space-2); }
+.quiet-button.danger { background: var(--warn-bg); color: var(--warn-text); }
+.workspace-row select { flex: none; width: 110px; }

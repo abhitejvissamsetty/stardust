@@ -18,6 +18,9 @@ pub struct SessionTab {
 pub struct Session {
     pub tabs: Vec<SessionTab>,
     pub active: usize,
+    /// The workspace the window belongs to. Empty is the main one.
+    #[serde(default)]
+    pub workspace: String,
 }
 
 fn can_restore(url: &str) -> bool {

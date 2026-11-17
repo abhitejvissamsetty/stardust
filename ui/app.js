@@ -438,7 +438,7 @@ function renderBookmarksBar(bookmarks, folders) {
   bar.hidden = folderButtons.length + bookmarkButtons.length === 0;
 }
 
-// Which menu under the toolbar is showing, if any: "folder", "menu" or "extensions".
+// Which menu under the toolbar is showing, if any: "folder", "menu", "extensions" or "workspaces".
 let menuState = { owner: null, zoom: 100 };
 
 function hideMenu() {
@@ -447,12 +447,13 @@ function hideMenu() {
     send({ type: "hidePopup" });
     byId("menu-button").setAttribute("aria-expanded", "false");
     byId("extensions-button").setAttribute("aria-expanded", "false");
+    byId("workspace-button").setAttribute("aria-expanded", "false");
   }
 }
 
 // Anything clicked other than a menu's own button puts the menu away.
 document.addEventListener("pointerdown", (event) => {
-  if (!event.target.closest("#menu-button, #extensions-button, .ext-button")) {
+  if (!event.target.closest("#menu-button, #extensions-button, #workspace-button, .ext-button")) {
     hideMenu();
     // An extension's popup goes away too, whether or not one is showing.
     send({ type: "hideExtensionPopup" });
@@ -527,6 +528,8 @@ window.onBrowserEvent = (event) => {
     windowId = event.windowId;
     document.documentElement.toggleAttribute("data-private", Boolean(event.private));
     byId("private-badge").hidden = !event.private;
+    // A private window belongs to no workspace.
+    byId("workspace-button").hidden = Boolean(event.private);
     if (switched) {
       hideSuggestions();
       if (document.activeElement === address) {
@@ -547,6 +550,12 @@ window.onBrowserEvent = (event) => {
     renderPinned();
     if (menuState.owner === "extensions") {
       openExtensionsMenu();
+    }
+  } else if (event.type === "workspaces") {
+    workspacesState = { items: event.items, current: event.current };
+    renderWorkspace();
+    if (menuState.owner === "workspaces") {
+      openWorkspaceMenu();
     }
   } else if (event.type === "windowState") {
     windowState = event;
@@ -618,6 +627,7 @@ byId("close-anyway").addEventListener("click", () => {
 });
 byId("menu-button").addEventListener("click", () => toggleMenu("menu", openAppMenu));
 byId("extensions-button").addEventListener("click", () => toggleMenu("extensions", openExtensionsMenu));
+byId("workspace-button").addEventListener("click", () => toggleMenu("workspaces", openWorkspaceMenu));
 byId("zoom-chip").addEventListener("click", () => send({ type: "zoomReset" }));
 byId("clear-downloads").addEventListener("click", () => send({ type: "clearDownloads" }));
 byId("new-tab").addEventListener("click", () => send({ type: "newTab" }));
@@ -715,10 +725,11 @@ const isMac = /Mac/.test(navigator.platform);
 const shortcut = (key, { shift = false, alt = false } = {}) =>
   isMac ? `${alt ? "⌥" : ""}${shift ? "⇧" : ""}⌘${key}` : `Ctrl+${shift ? "Shift+" : ""}${alt ? "Alt+" : ""}${key}`;
 
-const ROW_HEIGHT = { item: 34, separator: 9, zoom: 40, extension: 40, note: 40, header: 30 };
+const ROW_HEIGHT = { item: 34, separator: 9, zoom: 40, extension: 40, note: 40, header: 30, workspace: 38 };
 const MENU_WIDTH = 300;
 
 let extensionsState = { items: [], available: true };
+let workspacesState = { items: [], current: "" };
 
 function toggleMenu(owner, open) {
   if (menuState.owner === owner) {
@@ -737,6 +748,7 @@ function showMenu(owner, button, rows, width) {
   menuState = { owner, zoom: activeTab()?.zoomPercent || 100 };
   byId("menu-button").setAttribute("aria-expanded", String(owner === "menu"));
   byId("extensions-button").setAttribute("aria-expanded", String(owner === "extensions"));
+  byId("workspace-button").setAttribute("aria-expanded", String(owner === "workspaces"));
   send({
     type: "showPopup",
     left: Math.round(Math.max(8, box.right - width)),
@@ -772,12 +784,32 @@ function openAppMenu() {
   showMenu("menu", byId("menu-button"), rows, MENU_WIDTH);
 }
 
+function openWorkspaceMenu() {
+  const rows = [{ kind: "header", label: "Workspaces" }];
+  for (const item of workspacesState.items) {
+    rows.push({ kind: "workspace", id: item.id, name: item.name, color: item.color, open: item.open, current: item.id === workspacesState.current });
+  }
+  rows.push({ kind: "separator" }, { label: "Manage workspaces", command: { type: "openPage", page: "settings" } });
+  showMenu("workspaces", byId("workspace-button"), rows, MENU_WIDTH);
+}
+
+function renderWorkspace() {
+  const current = workspacesState.items.find((item) => item.id === workspacesState.current) || workspacesState.items[0];
+  const button = byId("workspace-button");
+  if (!current) {
+    return;
+  }
+  byId("ws-dot").dataset.color = current.color;
+  byId("ws-name").textContent = current.name;
+  button.title = `Workspace: ${current.name}. Switch workspace`;
+}
+
 function openExtensionsMenu() {
   const button = byId("extensions-button");
   const box = button.getBoundingClientRect();
   const rows = [{ kind: "header", label: "Extensions" }];
   if (!extensionsState.available) {
-    rows.push({ kind: "note", label: "Extensions aren't used in private windows." });
+    rows.push({ kind: "note", label: "Extensions only run in the main workspace, not in private windows or other workspaces." });
   } else if (extensionsState.items.length === 0) {
     rows.push({ kind: "note", label: "No extensions yet." });
   } else {

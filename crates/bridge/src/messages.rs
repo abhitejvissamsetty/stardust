@@ -93,6 +93,10 @@ pub enum UiCommand {
     },
     NewWindow,
     NewPrivateWindow,
+    /// Shows a workspace's window, or opens it with the tabs it had.
+    OpenWorkspace {
+        id: String,
+    },
     OpenFind,
     Quit,
     ReopenClosedTab,
@@ -159,6 +163,11 @@ pub enum UiEvent<'a> {
         items: &'a [serde_json::Value],
         /// Private windows don't run extensions.
         available: bool,
+    },
+    /// The workspaces to switch between, and the one this window belongs to.
+    Workspaces {
+        items: &'a [serde_json::Value],
+        current: &'a str,
     },
     Downloads {
         items: &'a [Download],

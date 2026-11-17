@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::rc::Rc;
 
 use bridge::{Session, TabId};
 use cef::*;
@@ -6,8 +7,9 @@ use cef::*;
 use crate::{
     client::{
         SharedShell, ToolbarClient, adopt_menu_view, clear_window, extension_load_paths,
-        load_background_tabs, make_private, prepare_tabs, register_shell, schedule_discard_check,
-        select_tab, set_window, startup_windows, toolbar_height, try_close_all, window_activated,
+        load_background_tabs, make_private, make_workspace, prepare_tabs, register_shell,
+        schedule_discard_check, select_tab, set_window, startup_windows, toolbar_height,
+        try_close_all, window_activated,
     },
     render::BridgeInstaller,
     ui::toolbar_url,
@@ -117,12 +119,124 @@ fn requested_urls(inputs: impl Iterator<Item = String>) -> Vec<String> {
 /// Opens a window. Restored tabs load when selected, starting with the first one shown.
 /// Requested addresses open as tabs that load straight away.
 pub fn open_window(session: Option<Session>, requested_urls: &[String], private: bool) {
+    let workspace = session
+        .as_ref()
+        .map(|session| session.workspace.clone())
+        .unwrap_or_default();
+    open_window_in(session, requested_urls, private, &workspace);
+}
+
+/// Opens a window in a workspace. Empty is the main one, and a private window never
+/// belongs to any.
+pub fn open_window_in(
+    session: Option<Session>,
+    requested_urls: &[String],
+    private: bool,
+    workspace: &str,
+) {
     let shell = SharedShell::default();
     register_shell(&shell);
+    let urls = requested_urls.to_vec();
     if private {
         make_private(&shell);
+        finish_open_window(shell, session, &urls);
+        return;
+    }
+    if workspace.is_empty() {
+        finish_open_window(shell, session, &urls);
+        return;
+    }
+    // A workspace's profile is on disk, and Chromium starts it up in its own time:
+    // a page made before it's ready fails. So the window's tabs wait for its signal.
+    let finish_shell = shell.clone();
+    let waiting = Rc::new(RefCell::new(WaitingWindow {
+        ready: false,
+        armed: false,
+        start: Some(Box::new(move || {
+            finish_open_window(finish_shell, session, &urls)
+        })),
+    }));
+    let mut handler = WorkspaceReady::new(waiting.clone());
+    if !make_workspace(&shell, workspace, Some(&mut handler)) {
+        // Not a workspace that exists, so this is a main window after all.
+        if let Some(start) = waiting.borrow_mut().start.take() {
+            start();
+        }
+        return;
+    }
+    // The signal may have come while the context was being made.
+    let start = {
+        let mut state = waiting.borrow_mut();
+        state.armed = true;
+        if state.ready {
+            state.start.take()
+        } else {
+            None
+        }
+    };
+    match start {
+        Some(start) => start(),
+        // If the signal never comes, don't leave the person with no window.
+        None => {
+            post_delayed_task(
+                ThreadId::UI,
+                Some(&mut WorkspaceTimeout::new(waiting)),
+                WORKSPACE_START_TIMEOUT_MS,
+            );
+        }
+    }
+}
+
+const WORKSPACE_START_TIMEOUT_MS: i64 = 4000;
+
+/// A window waiting for its workspace's profile to be ready.
+struct WaitingWindow {
+    ready: bool,
+    /// The profile has been made, so a signal from now on may start the window.
+    armed: bool,
+    start: Option<Box<dyn FnOnce()>>,
+}
+
+fn start_waiting(waiting: &Rc<RefCell<WaitingWindow>>, only_if_armed: bool) {
+    let start = {
+        let mut state = waiting.borrow_mut();
+        state.ready = true;
+        if only_if_armed && !state.armed {
+            return;
+        }
+        state.start.take()
+    };
+    if let Some(start) = start {
+        start();
+    }
+}
+
+wrap_request_context_handler! {
+    struct WorkspaceReady {
+        waiting: Rc<RefCell<WaitingWindow>>,
     }
 
+    impl RequestContextHandler {
+        fn on_request_context_initialized(&self, _context: Option<&mut RequestContext>) {
+            start_waiting(&self.waiting, true);
+        }
+    }
+}
+
+wrap_task! {
+    struct WorkspaceTimeout {
+        waiting: Rc<RefCell<WaitingWindow>>,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            start_waiting(&self.waiting, false);
+        }
+    }
+}
+
+/// Makes the window's toolbar and tabs, once its profile is ready.
+fn finish_open_window(shell: SharedShell, session: Option<Session>, requested_urls: &[String]) {
     let mut toolbar_client = ToolbarClient::new(shell.clone());
     let toolbar = browser_view_create(
         Some(&mut toolbar_client),

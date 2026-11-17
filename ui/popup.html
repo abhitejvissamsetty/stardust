@@ -51,6 +51,17 @@
       .ext-row { height: 40px; }
       .ext-row img, .ext-row .letter { border-radius: 5px; flex: none; height: 24px; width: 24px; }
       .ext-row .letter { align-items: center; background: hsl(var(--hue, 215) 55% 45%); color: #fff; display: flex; font-size: 12px; font-weight: 600; justify-content: center; }
+      .ws-row { height: 38px; }
+      .ws-row .dot { background: var(--ws-blue); border-radius: 999px; flex: none; height: 12px; width: 12px; }
+      .ws-row .dot[data-color="green"] { background: var(--ws-green); }
+      .ws-row .dot[data-color="red"] { background: var(--ws-red); }
+      .ws-row .dot[data-color="amber"] { background: var(--ws-amber); }
+      .ws-row .dot[data-color="purple"] { background: var(--ws-purple); }
+      .ws-row .dot[data-color="pink"] { background: var(--ws-pink); }
+      .ws-row .dot[data-color="teal"] { background: var(--ws-teal); }
+      .ws-row .dot[data-color="gray"] { background: var(--ws-gray); }
+      .ws-row .state { color: var(--text-muted); flex: none; font-size: 12px; }
+      .ws-row.current .state { color: var(--accent); }
       .pin[aria-pressed="true"] { color: var(--accent); }
       .pin[aria-pressed="true"] svg { fill: currentcolor; }
     </style>

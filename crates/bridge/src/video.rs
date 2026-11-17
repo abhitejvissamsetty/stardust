@@ -70,7 +70,7 @@ mod tests {
         let folder = std::env::temp_dir().join(format!("stardust-vaapi-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&folder);
         std::fs::create_dir_all(&folder).unwrap();
-        assert!(!has_vaapi_driver(&[folder.clone()]));
+        assert!(!has_vaapi_driver(std::slice::from_ref(&folder)));
         std::fs::write(folder.join("iHD_drv_video.so"), b"").unwrap();
         assert!(has_vaapi_driver(&[
             PathBuf::from("/missing"),

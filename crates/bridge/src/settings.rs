@@ -147,6 +147,25 @@ impl InternalPage {
     rename_all_fields = "camelCase"
 )]
 pub enum PageCommand {
+    ListWorkspaces,
+    CreateWorkspace {
+        name: String,
+        color: String,
+    },
+    RenameWorkspace {
+        id: String,
+        name: String,
+    },
+    SetWorkspaceColor {
+        id: String,
+        color: String,
+    },
+    DeleteWorkspace {
+        id: String,
+    },
+    OpenWorkspace {
+        id: String,
+    },
     ListHistory {
         query: String,
     },

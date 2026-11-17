@@ -38,6 +38,16 @@
   --text-muted: #62656e;
   --text-disabled: #b1b3ba;
   --accent: #2f6fed;
+
+  /* Workspace colours, chosen from this fixed list. */
+  --ws-blue: #2f6fed;
+  --ws-green: #2e9e6b;
+  --ws-red: #d9453d;
+  --ws-amber: #d98e1f;
+  --ws-purple: #8b5cf6;
+  --ws-pink: #d6479a;
+  --ws-teal: #14a3a3;
+  --ws-gray: #7b7f8a;
   --page: #ffffff;
   --danger: #c5362c;
   --on-accent: #ffffff;

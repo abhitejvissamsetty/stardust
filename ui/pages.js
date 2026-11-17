@@ -397,8 +397,114 @@ function refresh() {
   send({ type: page === "history" ? "listHistory" : "listBookmarks", query });
 }
 
+// -- Workspaces --------------------------------------------------------------------------
+
+const WORKSPACE_COLORS = ["blue", "green", "red", "amber", "purple", "pink", "teal", "gray"];
+const workspaceState = { removeAsk: null, renaming: null };
+
+function workspaceRow(item) {
+  const element = document.createElement("div");
+  element.className = "toolbar-row workspace-row";
+  const dot = document.createElement("span");
+  dot.className = "ws-dot";
+  dot.dataset.color = item.color;
+  let label;
+  if (workspaceState.renaming === item.id) {
+    label = document.createElement("input");
+    label.type = "text";
+    label.maxLength = 40;
+    label.value = item.name;
+    label.className = "wide-input";
+    label.setAttribute("aria-label", "Workspace name");
+    label.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        workspaceState.renaming = null;
+        send({ type: "renameWorkspace", id: item.id, name: label.value });
+      } else if (event.key === "Escape") {
+        workspaceState.renaming = null;
+        send({ type: "listWorkspaces" });
+      }
+    });
+    setTimeout(() => label.focus(), 0);
+  } else {
+    label = document.createElement("span");
+    label.className = "workspace-name";
+    label.textContent = item.main ? `${item.name} (main)` : item.name;
+  }
+  element.append(dot, label);
+  const button = (text, action) => {
+    const control = document.createElement("button");
+    control.className = "quiet-button";
+    control.type = "button";
+    control.textContent = text;
+    control.addEventListener("click", action);
+    return control;
+  };
+  const open = button("Open", () => send({ type: "openWorkspace", id: item.id }));
+  if (item.main) {
+    element.append(open);
+  } else {
+    const colors = document.createElement("select");
+    colors.setAttribute("aria-label", "Colour");
+    for (const color of WORKSPACE_COLORS) {
+      colors.append(new Option(color[0].toUpperCase() + color.slice(1), color, false, color === item.color));
+    }
+    colors.addEventListener("change", () => send({ type: "setWorkspaceColor", id: item.id, color: colors.value }));
+    element.append(colors, open);
+    element.append(button("Rename", () => {
+      workspaceState.renaming = item.id;
+      send({ type: "listWorkspaces" });
+    }));
+    const remove = button(workspaceState.removeAsk === item.id ? "Click again to delete" : "Delete", () => {
+      if (workspaceState.removeAsk === item.id) {
+        workspaceState.removeAsk = null;
+        send({ type: "deleteWorkspace", id: item.id });
+      } else {
+        workspaceState.removeAsk = item.id;
+        send({ type: "listWorkspaces" });
+        setTimeout(() => {
+          if (workspaceState.removeAsk === item.id) {
+            workspaceState.removeAsk = null;
+            send({ type: "listWorkspaces" });
+          }
+        }, 4000);
+      }
+    });
+    remove.classList.toggle("danger", workspaceState.removeAsk === item.id);
+    element.append(remove);
+  }
+  return element;
+}
+
+function workspacesEvent(event) {
+  byId("workspace-list").replaceChildren(...event.items.map(workspaceRow));
+  const hint = byId("workspace-hint");
+  hint.classList.toggle("error", Boolean(event.error));
+  hint.textContent = event.error || "";
+}
+
+function setupWorkspaces() {
+  const colors = byId("new-workspace-color");
+  for (const color of WORKSPACE_COLORS) {
+    colors.append(new Option(color[0].toUpperCase() + color.slice(1), color));
+  }
+  const create = () => {
+    send({ type: "createWorkspace", name: byId("new-workspace").value, color: colors.value });
+    byId("new-workspace").value = "";
+  };
+  byId("create-workspace").addEventListener("click", create);
+  byId("new-workspace").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      create();
+    }
+  });
+  send({ type: "listWorkspaces" });
+}
+
 window.onBrowserEvent = (event) => {
-  if (event.type === "extensions" || event.type === "extensionToInstall" || event.type === "extensionError") {
+  if (event.type === "workspaces") {
+    workspacesEvent(event);
+  } else if (event.type === "extensions" || event.type === "extensionToInstall" || event.type === "extensionError") {
     extensionsEvent(event);
   } else if (event.type === "history") {
     showList(event.items.map((item) =>
@@ -528,6 +634,7 @@ window.onBrowserEvent = (event) => {
 };
 
 if (page === "settings") {
+  setupWorkspaces();
   byId("engine").addEventListener("change", (event) => {
     send({ type: "setSearchEngine", engine: event.target.value });
   });

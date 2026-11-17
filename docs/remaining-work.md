@@ -130,6 +130,17 @@ What's left:
 
 Also: one unexplained "Google" tab appeared once during testing and didn't come back. See [milestone-5.md](milestone-5.md#a-stray-tab).
 
+## 12. Workspaces
+
+Built in [milestone-6.md](milestone-6.md). What's left:
+
+1. **Saved passwords are shared** by all workspaces, so the key button can fill the wrong account on a site. Needs the login list, and the keychain entries, split by workspace.
+2. **Extensions only run in Personal.** Chromium loads them into the original profile only.
+3. **Clear browsing data** in Settings clears the Personal profile's cookies and cache only, not a workspace's.
+4. **History and bookmarks are shared.** Decide whether a workspace should have its own.
+5. Memory cost of many workspaces open at once, and the untested cases listed in the milestone.
+6. Icons for Windows (`.ico`) and Linux.
+
 ## How to test on macOS
 
 - Build with `cargo xtask bundle`, then run `./dist/stardust.app/Contents/MacOS/stardust`.

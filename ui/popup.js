@@ -65,6 +65,17 @@ function renderMenu(event) {
         );
         return element;
       }
+      case "workspace": {
+        const element = el("div", row.current ? "item ws-row current" : "item ws-row");
+        element.setAttribute("role", "menuitemradio");
+        element.setAttribute("aria-checked", String(row.current));
+        const dot = el("span", "dot");
+        dot.dataset.color = row.color;
+        element.append(dot, el("span", "label", row.name));
+        element.append(el("span", "state", row.current ? "This window" : row.open ? "Open" : ""));
+        onPress(element, () => done({ type: "openWorkspace", id: row.id }));
+        return element;
+      }
       case "extension": {
         const element = el("div", "item ext-row");
         element.setAttribute("role", "menuitem");
