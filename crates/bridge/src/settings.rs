@@ -122,10 +122,12 @@ pub enum InternalPage {
     Screenshot,
     /// Everything kept: screenshots, clips, snippets and colours, with tags and search.
     Library,
+    /// Shown once after Stardust is first opened.
+    Welcome,
 }
 
 impl InternalPage {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::History,
         Self::Bookmarks,
         Self::Settings,
@@ -133,11 +135,12 @@ impl InternalPage {
         Self::Extensions,
         Self::Screenshot,
         Self::Library,
+        Self::Welcome,
     ];
 
     /// Whether a saved tab on this page is reopened after a restart.
     pub fn is_restorable(self) -> bool {
-        self != Self::Screenshot
+        !matches!(self, Self::Screenshot | Self::Welcome)
     }
 
     pub fn address(self) -> &'static str {
@@ -149,6 +152,7 @@ impl InternalPage {
             Self::Extensions => "browser://extensions",
             Self::Screenshot => "browser://screenshot",
             Self::Library => "browser://library",
+            Self::Welcome => "browser://welcome",
         }
     }
 
@@ -169,6 +173,14 @@ impl InternalPage {
 pub enum PageCommand {
     /// The screenshot page asks for the picture that was taken for it.
     GetScreenshot,
+    /// The welcome page is done: bookmark the chosen platforms (by id), make a workspace
+    /// if it was given a name, and move on to a new tab.
+    FinishWelcome {
+        platforms: Vec<String>,
+        workspace: String,
+        color: String,
+    },
+    ListPlatforms,
     /// Searches the library. An empty kind or tag means any.
     ListLibrary {
         query: String,

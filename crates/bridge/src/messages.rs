@@ -109,6 +109,8 @@ pub enum UiCommand {
     CommandBar,
     /// Opens the library page.
     OpenLibrary,
+    /// Opens the welcome page again.
+    OpenWelcome,
     /// The side panel's page has loaded and can be sent what it shows.
     SidePanelReady,
     SetNotes {
@@ -234,6 +236,7 @@ impl UiCommand {
                 | Self::PickColor
                 | Self::InspectText
                 | Self::OpenLibrary
+                | Self::OpenWelcome
         )
     }
 }

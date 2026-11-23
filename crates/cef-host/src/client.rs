@@ -72,6 +72,7 @@ const SETTING_EXTENSIONS: &str = "extensions";
 const SETTING_WORKSPACES: &str = "workspaces";
 const SETTING_SIDE_PANEL: &str = "side_panel";
 const SETTING_LIBRARY: &str = "library";
+const SETTING_WELCOME_SHOWN: &str = "welcome_shown";
 /// Each workspace's open tabs are saved under this, then its id.
 const WORKSPACE_TABS_PREFIX: &str = "workspace_tabs_";
 /// Extensions waiting for the person to agree to them. More than this drops the oldest.
@@ -894,6 +895,21 @@ pub fn startup_windows() -> Vec<Session> {
     with_storage(|storage| storage.setting(SETTING_SESSION))
         .flatten()
         .map_or_else(Vec::new, |json| SavedWindows::parse(&json).windows)
+}
+
+/// True the first time Stardust is opened, and never again: the welcome page is shown once.
+pub fn take_first_run() -> bool {
+    let shown = with_storage(|storage| storage.setting(SETTING_WELCOME_SHOWN)).flatten();
+    if shown.is_some() {
+        return false;
+    }
+    with_storage(|storage| storage.set_setting(SETTING_WELCOME_SHOWN, "1"));
+    true
+}
+
+/// The address of the welcome page, for the first window.
+pub fn welcome_url() -> &'static str {
+    internal_url(InternalPage::Welcome)
 }
 
 /// Sets up the tabs to show at startup and returns the one to select first. Nothing
@@ -2392,6 +2408,7 @@ fn run_command(shell: &SharedShell, command: UiCommand) {
         UiCommand::ToggleSidePanel => toggle_side_panel(shell),
         UiCommand::CommandBar => open_command_bar(shell),
         UiCommand::OpenLibrary => open_page(shell, InternalPage::Library),
+        UiCommand::OpenWelcome => open_page(shell, InternalPage::Welcome),
         // Only the side panel sends this, and it's handled where it arrives.
         UiCommand::SidePanelReady => {}
         UiCommand::SetNotes { text } => change_panel_data(|data| {
@@ -2674,6 +2691,38 @@ fn run_page_command(shell: &SharedShell, tab: TabId, frame: &Frame, command: Pag
         PageCommand::SetSearchEngine { engine } => {
             settings().search_engine = engine;
             with_storage(|storage| storage.set_setting(SETTING_SEARCH_ENGINE, engine.id()));
+        }
+        PageCommand::ListPlatforms => {
+            let platforms: Vec<_> = bridge::PLATFORMS
+                .iter()
+                .map(|platform| serde_json::json!({ "id": platform.id, "name": platform.name }))
+                .collect();
+            reply(serde_json::json!({ "type": "platforms", "platforms": platforms }));
+        }
+        PageCommand::FinishWelcome {
+            platforms,
+            workspace,
+            color,
+        } => {
+            let name = workspace.trim().to_owned();
+            // A workspace that can't be made (a name taken, say) is reported and nothing
+            // else happens, so the page can ask again.
+            if !name.is_empty() {
+                let result = workspace_list().create(&name, &color);
+                if let Err(error) = result {
+                    reply(serde_json::json!({ "type": "welcomeResult", "error": error }));
+                    return;
+                }
+                save_workspace_list();
+                publish_workspaces_everywhere();
+            }
+            for platform in bridge::chosen_platforms(&platforms) {
+                with_storage(|storage| storage.add_bookmark(platform.url, platform.name, now_ms()));
+            }
+            refresh_bookmark_stars();
+            reply(serde_json::json!({ "type": "welcomeResult", "error": null }));
+            let homepage = settings().homepage.clone();
+            navigate(shell, &homepage);
         }
         PageCommand::ListLibrary { query, kind, tag } => reply(library_event(&query, &kind, &tag)),
         PageCommand::SaveShotToLibrary {
@@ -5896,6 +5945,7 @@ pub fn run_menu_action(action: crate::menubar::MenuAction) {
         Action::PickColor => take_screenshot(shell, false, true),
         Action::InspectText => inspect_text(shell),
         Action::Library => open_page(shell, InternalPage::Library),
+        Action::Welcome => open_page(shell, InternalPage::Welcome),
         Action::Extensions => open_page(shell, InternalPage::Extensions),
         Action::Workspace(id) => open_workspace(&id),
         Action::ManageWorkspaces => open_page(shell, InternalPage::Settings),

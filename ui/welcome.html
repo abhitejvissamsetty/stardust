@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
+    <title>Welcome to Stardust</title>
+    <style>
+      /*TOKENS*/
+      * { box-sizing: border-box; }
+      html, body { margin: 0; min-height: 100%; }
+      body { background: var(--page); color: var(--text); font: var(--text-md) var(--font-ui); line-height: 1.5; }
+      button, input, select { font: inherit; }
+      main { margin: 0 auto; max-width: 760px; padding: 56px 24px 80px; }
+      .hero { text-align: center; margin-bottom: 36px; }
+      .star { height: 64px; width: 64px; }
+      h1 { font-size: 34px; letter-spacing: -0.02em; margin: 14px 0 8px; }
+      .lead { color: var(--text-muted); font-size: 17px; margin: 0 auto; max-width: 520px; }
+      .card { background: var(--surface); border: 1px solid var(--divider); border-radius: 14px; margin-bottom: 16px; padding: 22px 24px; }
+      .card h2 { align-items: center; display: flex; font-size: 18px; gap: 10px; margin: 0 0 4px; }
+      .num { align-items: center; background: var(--accent); border-radius: 50%; color: var(--on-accent); display: inline-flex; flex: none; font-size: 13px; font-weight: 700; height: 24px; justify-content: center; width: 24px; }
+      .card p { color: var(--text-muted); margin: 0 0 14px; }
+      .row { align-items: center; display: flex; flex-wrap: wrap; gap: 10px; }
+      select, input[type="text"] { background: var(--field); border: 1px solid transparent; border-radius: 8px; color: var(--text); height: 36px; outline: none; padding: 0 12px; }
+      select:focus, input[type="text"]:focus { background: var(--field-focus); border-color: var(--accent); }
+      input[type="text"] { flex: 1; min-width: 180px; }
+      .btn { background: var(--field); border: 0; border-radius: 8px; color: var(--text); cursor: default; height: 36px; padding: 0 16px; }
+      .btn:hover { background: var(--press); }
+      .btn:disabled { color: var(--text-disabled); }
+      .btn.primary { background: var(--accent); color: var(--on-accent); font-weight: 600; }
+      .btn.primary:hover { background: var(--accent); filter: brightness(1.08); }
+      .btn.big { font-size: 16px; height: 46px; padding: 0 28px; }
+      .hint { color: var(--text-muted); font-size: var(--text-sm); min-height: 20px; }
+      .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+      .chip { background: var(--page); border: 1px solid var(--divider); border-radius: 999px; color: var(--text); cursor: default; height: 34px; padding: 0 16px; }
+      .chip:hover { background: var(--hover); }
+      .chip[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+      .colors { display: flex; gap: 8px; }
+      .dot { border: 3px solid transparent; border-radius: 50%; cursor: default; height: 26px; padding: 0; width: 26px; }
+      .dot[aria-pressed="true"] { border-color: var(--text); }
+      .tips { display: grid; gap: 10px 24px; grid-template-columns: 1fr 1fr; margin: 0; padding: 0; list-style: none; }
+      .tips li { color: var(--text-muted); font-size: 14px; }
+      .tips b { color: var(--text); font-weight: 600; }
+      kbd { background: var(--field); border: 1px solid var(--divider); border-radius: 5px; color: var(--text); font: 12px ui-monospace, Menlo, monospace; padding: 1px 6px; }
+      .done { margin-top: 28px; text-align: center; }
+      .done .hint { margin-top: 10px; }
+      .error { color: var(--warn-text); }
+      [hidden] { display: none !important; }
+      @media (max-width: 560px) { .tips { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="hero">
+        <svg class="star" viewBox="0 0 64 64" aria-hidden="true">
+          <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7ba4ff" /><stop offset="1" stop-color="#8b5cf6" /></linearGradient></defs>
+          <path d="M32 4l7 19 19 7-19 7-7 19-7-19-19-7 19-7z" fill="url(#g)" />
+        </svg>
+        <h1>Welcome to Stardust</h1>
+        <p class="lead">A browser for people who make things. Set it up in a minute, or skip straight to browsing. You can change all of this later.</p>
+      </div>
+
+      <section class="card" id="import-card" hidden>
+        <h2><span class="num">1</span> Bring your things over</h2>
+        <p>Copy your bookmarks and history from another browser on this computer. Nothing is deleted from it.</p>
+        <div class="row">
+          <select id="import-source" aria-label="Browser to import from"></select>
+          <button class="btn" id="import" type="button">Import</button>
+        </div>
+        <div class="hint" id="import-hint" role="status"></div>
+      </section>
+
+      <section class="card">
+        <h2><span class="num" id="n-platforms">1</span> Where do you post?</h2>
+        <p>Pick the places you work in. They're added to your bookmarks so they're one click away.</p>
+        <div class="chips" id="platforms" role="group" aria-label="Platforms"></div>
+      </section>
+
+      <section class="card">
+        <h2><span class="num" id="n-workspace">2</span> Make your first workspace</h2>
+        <p>A workspace keeps its own logins, tabs and cookies, so you can sign in to a few channels or brands side by side without mixing them up. Leave it empty to skip.</p>
+        <div class="row">
+          <input id="workspace" type="text" maxlength="40" placeholder="For example: My channel" aria-label="Workspace name" autocomplete="off" />
+          <div class="colors" id="colors" role="group" aria-label="Workspace colour"></div>
+        </div>
+        <div class="hint error" id="workspace-error" role="alert"></div>
+      </section>
+
+      <section class="card">
+        <h2><span class="num" id="n-tips">3</span> Good to know</h2>
+        <ul class="tips" id="tips"></ul>
+      </section>
+
+      <div class="done">
+        <button class="btn primary big" id="finish" type="button">Start browsing</button>
+        <div class="hint">You can open this page again from the command bar: search "Welcome".</div>
+      </div>
+    </main>
+    <script>
+      "use strict";
+      const send = (command) => window.browserBridge.send(JSON.stringify(command));
+      const byId = (id) => document.getElementById(id);
+      const mac = /Mac/i.test(navigator.platform || "");
+      const mod = mac ? "⌘" : "Ctrl+";
+      const shift = mac ? "⇧" : "Shift+";
+
+      const tips = [
+        [`${mod}${shift}A`, "Search tabs and commands"],
+        [`${mod}${shift}S`, "Clip a page"],
+        [`${mod}${shift}E`, "Side panel for clips and colours"],
+        [`${mod}${shift}N`, "Private window"],
+        [`${mod}T`, "New tab"],
+        [`${mod}F`, "Find on the page"],
+      ];
+      byId("tips").replaceChildren(...tips.map(([keys, text]) => {
+        const item = document.createElement("li");
+        const key = document.createElement("kbd");
+        key.textContent = keys;
+        const label = document.createElement("b");
+        label.textContent = " " + text;
+        item.append(key, label);
+        return item;
+      }));
+
+      // Platforms
+      const chosen = new Set();
+      function renderPlatforms(platforms) {
+        byId("platforms").replaceChildren(...platforms.map((platform) => {
+          const chip = document.createElement("button");
+          chip.type = "button";
+          chip.className = "chip";
+          chip.textContent = platform.name;
+          chip.setAttribute("aria-pressed", "false");
+          chip.addEventListener("click", () => {
+            if (chosen.has(platform.id)) chosen.delete(platform.id); else chosen.add(platform.id);
+            chip.setAttribute("aria-pressed", String(chosen.has(platform.id)));
+          });
+          return chip;
+        }));
+      }
+
+      // Workspace colour
+      const COLORS = ["blue", "green", "red", "amber", "purple", "pink", "teal", "gray"];
+      let color = "blue";
+      byId("colors").replaceChildren(...COLORS.map((name) => {
+        const dot = document.createElement("button");
+        dot.type = "button";
+        dot.className = "dot";
+        dot.style.background = `var(--ws-${name})`;
+        dot.title = name;
+        dot.setAttribute("aria-label", `Colour ${name}`);
+        dot.setAttribute("aria-pressed", String(name === color));
+        dot.addEventListener("click", () => {
+          color = name;
+          for (const other of byId("colors").children) other.setAttribute("aria-pressed", String(other === dot));
+        });
+        return dot;
+      }));
+
+      // Import (shown only when another browser is found)
+      byId("import").addEventListener("click", () => {
+        byId("import").disabled = true;
+        byId("import-hint").textContent = "Importing…";
+        send({ type: "import", source: byId("import-source").value });
+      });
+
+      byId("finish").addEventListener("click", () => {
+        byId("workspace-error").textContent = "";
+        byId("finish").disabled = true;
+        send({ type: "finishWelcome", platforms: [...chosen], workspace: byId("workspace").value, color });
+      });
+
+      function renumber(hasImport) {
+        byId("n-platforms").textContent = hasImport ? "2" : "1";
+        byId("n-workspace").textContent = hasImport ? "3" : "2";
+        byId("n-tips").textContent = hasImport ? "4" : "3";
+      }
+
+      window.onBrowserEvent = (event) => {
+        if (event.type === "importSources") {
+          const options = event.sources.map((source) => Object.assign(document.createElement("option"), { value: source.id, textContent: source.name }));
+          byId("import-source").replaceChildren(...options);
+          byId("import-card").hidden = options.length === 0;
+          renumber(options.length > 0);
+        } else if (event.type === "importResult") {
+          byId("import").disabled = false;
+          byId("import-hint").textContent = `Added ${event.bookmarks} bookmarks and ${event.history} history entries.`;
+        } else if (event.type === "platforms") {
+          renderPlatforms(event.platforms);
+        } else if (event.type === "welcomeResult" && event.error) {
+          byId("finish").disabled = false;
+          byId("workspace-error").textContent = event.error;
+        }
+      };
+      send({ type: "listPlatforms" });
+      send({ type: "listImportSources" });
+    </script>
+  </body>
+</html>

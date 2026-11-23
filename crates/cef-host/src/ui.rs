@@ -14,6 +14,7 @@ const HISTORY: &str = include_str!("../../../ui/history.html");
 const BOOKMARKS: &str = include_str!("../../../ui/bookmarks.html");
 const SETTINGS: &str = include_str!("../../../ui/settings.html");
 const DOWNLOADS: &str = include_str!("../../../ui/downloads.html");
+const WELCOME: &str = include_str!("../../../ui/welcome.html");
 const LIBRARY: &str = include_str!("../../../ui/library.html");
 const SCREENSHOT: &str = include_str!("../../../ui/screenshot.html");
 const EXTENSIONS: &str = include_str!("../../../ui/extensions.html");
@@ -85,6 +86,7 @@ fn internal_urls() -> &'static HashMap<InternalPage, String> {
                     InternalPage::Extensions => EXTENSIONS,
                     InternalPage::Screenshot => SCREENSHOT,
                     InternalPage::Library => LIBRARY,
+                    InternalPage::Welcome => WELCOME,
                 };
                 let html = html
                     .replace("/*TOKENS*/", TOKENS)

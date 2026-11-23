@@ -26,6 +26,15 @@ jobs:
       - run: cargo clippy --workspace -- -D warnings
       - run: cargo test --workspace
       - run: cargo xtask bundle --release
+      # The Windows and Linux builds, to download from the run's page and try.
+      - name: Keep the build
+        if: runner.os != 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: stardust-${{ runner.os }}
+          path: dist
+          retention-days: 14
+          if-no-files-found: error
       - name: Check performance budgets
         if: runner.os == 'Linux'
         run: |

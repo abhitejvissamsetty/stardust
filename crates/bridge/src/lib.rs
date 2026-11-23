@@ -18,6 +18,7 @@ mod sidepanel;
 pub mod storage_types;
 mod tabs;
 mod video;
+mod welcome;
 mod workspaces;
 mod zoom;
 
@@ -44,6 +45,7 @@ pub use shortcuts::{KeyPress, Shortcut, shortcut_for};
 pub use sidepanel::{CLIP_SCRIPT, Clip, SidePanelData, Snippet, Todo};
 pub use tabs::{Tab, TabId, TabStrip};
 pub use video::{VAAPI_FEATURES, add_features, has_vaapi_driver, vaapi_driver_folders};
+pub use welcome::{PLATFORMS, Platform, chosen_platforms};
 pub use workspaces::{
     COLORS as WORKSPACE_COLORS, MAIN_COLOR, MAIN_NAME, MAIN_WORKSPACE, Workspace, Workspaces,
     is_valid_id as is_workspace_id,

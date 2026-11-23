@@ -33,6 +33,7 @@ pub enum MenuAction {
     PickColor,
     InspectText,
     Library,
+    Welcome,
     Extensions,
     Workspace(String),
     ManageWorkspaces,
@@ -412,12 +413,11 @@ fn window_menu() -> Vec<Entry> {
 }
 
 fn help_menu() -> Vec<Entry> {
-    vec![Action(
-        "Search Tabs and Commands…",
-        "",
-        0,
-        Sc(Shortcut::CommandBar),
-    )]
+    vec![
+        Action("Welcome to Stardust", "", 0, Welcome),
+        Separator,
+        Action("Search Tabs and Commands…", "", 0, Sc(Shortcut::CommandBar)),
+    ]
 }
 
 /// Installs the menu bar. Call once, on the main thread, after CEF has started.

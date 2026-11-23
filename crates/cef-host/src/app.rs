@@ -9,7 +9,7 @@ use crate::{
         SharedShell, ToolbarClient, adopt_menu_view, clear_window, extension_load_paths,
         load_background_tabs, make_private, make_workspace, prepare_tabs, register_shell,
         schedule_discard_check, select_tab, set_window, startup_windows, sync_sidebar,
-        toolbar_height, try_close_all, window_activated,
+        take_first_run, toolbar_height, try_close_all, welcome_url, window_activated,
     },
     render::BridgeInstaller,
     ui::toolbar_url,
@@ -98,6 +98,12 @@ wrap_browser_process_handler! {
                 Some(url).into_iter().chain(arguments.into_iter().map(|arg| arg.to_string())),
             );
 
+            // The very first time, the welcome page opens in place of the home page. An
+            // address given on the command line is still opened, after it.
+            let mut requested = requested;
+            if take_first_run() {
+                requested.insert(0, welcome_url().to_owned());
+            }
             let windows = startup_windows();
             let window_count = windows.len();
             for (index, session) in windows.into_iter().enumerate() {

@@ -334,6 +334,25 @@ The menu bar's items listed through accessibility; Duplicate Tab, New Tab, Close
 ### Removed
 The side panel no longer has **Notes, To-do or Snippets**, only **Clips and Colours**. Snippets are gone from the Library too. Saved notes, to-dos and snippets stay in the data file untouched, and nothing reads them.
 
+## Welcome page (first run)
+
+`browser://welcome` opens **once**, the first time Stardust is ever opened, in place of the home page (an address given on the command line still opens after it). It is remembered in a saved setting (`welcome_shown`), so it never comes back by itself, and it is not restored as a tab after a restart. It works the same on every system, since it's an ordinary internal page.
+
+- **Bring your things over:** only shown if another browser is found. It uses the same import as Settings and says how many bookmarks and history entries came across.
+- **Where do you post?** Ten platforms (YouTube Studio, Instagram, TikTok Studio, Meta Business Suite, X, LinkedIn, Twitch, Pinterest, Canva, CapCut). Those picked are added to the bookmarks. The page sends only the platform names; the addresses live in the browser (`crates/bridge/src/welcome.rs`), so a page can't bookmark an address of its own. Unit tests check every address is `https` and unknown names are ignored.
+- **Make your first workspace:** a name and one of the eight colours, or leave it empty. A name that's taken is reported on the page and nothing else happens, so it can be fixed.
+- **Good to know:** six shortcuts, shown with the right keys for the system (Cmd on a Mac, Ctrl elsewhere).
+- **Start browsing** does the above and moves to the home page.
+- **Open it again:** "Welcome to Stardust" in the command bar and the three-dot menu (all systems), and in the Help menu on a Mac.
+
+### Tested (macOS)
+A fresh profile showed it as the only tab (and by screenshot); picking YouTube and TikTok, a purple "My channel" workspace and Start browsing saved the two bookmarks and the workspace and went to the home page; a second launch did not show it; the command bar entry reopened it. The import step was not seen, as no other browser was found for it to import from on the test profile.
+
+### Windows and Linux
+- **Not built or run here.** This is a Mac, and Chromium's Windows and Linux builds need those systems. The code for the welcome page is shared and has no Mac-only parts, but nothing has been seen working on either.
+- The existing GitHub workflow (`.github/workflows/ci.yml`) already builds, lints and tests on Windows, Linux and macOS on every push. It now also **keeps the Windows and Linux builds** as downloadable files on each run's page for 14 days, so they can be tried on real machines.
+- Still missing on those systems: the menu bar (a Mac-only feature, so use the three-dot menu and command bar), copying images and links to the clipboard, and the app icon. See `docs/remaining-work.md`.
+
 ## Tests
 
 99 tests in `bridge` pass (13 new: workspace list rules, ids, colours, saved-data checks). Clippy and `cargo fmt` clean. In the running browser: cookie separation, persistence across a hard kill and restart, tab restoration, opening a workspace with saved tabs, duplicate-name and delete-while-open refusals, rename, create and delete, and the menu and Settings card by screenshot.

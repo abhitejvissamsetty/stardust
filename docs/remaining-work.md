@@ -147,7 +147,8 @@ Built in [milestone-6.md](milestone-6.md). What's left:
 11. **Colour picker:** `--force-color-profile=srgb` is kept by decision (it changes how everything is drawn on wide-gamut screens, so check video and photos look right); show the font actually drawn, more colour formats, and test on Windows and Linux. See the milestone.
 12. **Asset library:** folders or collections, bulk tag and delete, sorting, export, saving pictures from pages, a test with colours by hand, and speed with a large library. See the milestone.
 13. **Menus and right-click:** Windows and Linux versions, the missing Chrome items listed in the milestone (translate, cast, recent bookmarks and closed tabs, pin tab, task manager), hand tests of the untested items, and the duplicate Full Screen item. Old notes, to-dos and snippets code could be deleted.
-14. **Vertical tabs:** groups, search, pinned tabs, resizing by dragging, keyboard navigation, and a real-mouse test of drag reordering. See the milestone.
+14. **Welcome page:** try it on Windows and Linux (download the builds from the CI run), see the import step with a real second browser, and consider a default-browser step and a short tour.
+15. **Vertical tabs:** groups, search, pinned tabs, resizing by dragging, keyboard navigation, and a real-mouse test of drag reordering. See the milestone.
 
 ## How to test on macOS
 
