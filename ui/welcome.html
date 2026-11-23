@@ -100,12 +100,14 @@
         background: linear-gradient(180deg, #ffffff 30%, #b9bcc8); -webkit-background-clip: text; background-clip: text; color: transparent;
       }
       em { font-family: var(--serif); font-style: italic; font-weight: 400; letter-spacing: -0.02em; }
-      .sub { color: var(--ink-2); font-size: 16px; margin: 0 0 38px; max-width: 500px; }
+      .sub { color: var(--ink-2); font-size: 16px; margin: 0 0 min(38px, 4vh); max-width: 500px; }
+      .stage { scrollbar-width: none; }
+      .stage::-webkit-scrollbar { display: none; }
 
       /* Intro */
       .intro { text-align: center; }
       .intro .sub { margin-left: auto; margin-right: auto; }
-      .orb { display: block; height: min(300px, 34vh); margin: 0 auto 26px; overflow: visible; width: min(300px, 34vh); }
+      .orb { display: block; height: min(280px, 30vh); margin: 0 auto 2.4vh; overflow: visible; width: min(280px, 30vh); }
       .orb .ribbon { animation: drift 18s ease-in-out infinite alternate; transform-origin: 150px 150px; }
       .orb .spark { animation: breathe 5s ease-in-out infinite; transform-origin: 150px 150px; }
       .orb .rider { animation: orbit 14s linear infinite; transform-origin: 150px 150px; }
@@ -113,7 +115,7 @@
       @keyframes breathe { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(0.9); opacity: 0.82; } }
       @keyframes orbit { to { transform: rotate(360deg); } }
       .wordmark {
-        font-size: clamp(56px, 9vw, 104px); font-weight: 300; letter-spacing: -0.055em; line-height: 0.95; margin: 0 0 18px;
+        font-size: clamp(52px, min(9vw, 12vh), 104px); font-weight: 300; letter-spacing: -0.055em; line-height: 0.95; margin: 0 0 18px;
         background: linear-gradient(180deg, #ffffff 35%, #8d91a0 100%); -webkit-background-clip: text; background-clip: text; color: transparent;
       }
       .wordmark span { display: block; font-family: var(--serif); font-size: 0.28em; font-style: italic; font-weight: 400; letter-spacing: -0.01em; margin-bottom: 0.15em; color: var(--ink-2); -webkit-text-fill-color: var(--ink-2); }
@@ -143,7 +145,16 @@
       :focus-visible { outline: 1.5px solid rgb(255 255 255 / 80%); outline-offset: 3px; }
 
       /* Import */
-      .sources { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; }
+      .sources { align-items: center; display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; }
+      .select { position: relative; }
+      .select select {
+        -webkit-appearance: none; appearance: none; background: var(--glass); border: 1px solid var(--hair); border-radius: 999px; color: var(--ink);
+        height: 50px; max-width: 360px; min-width: 240px; outline: none; padding: 0 44px 0 22px; text-overflow: ellipsis;
+        -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); transition: border-color 0.3s, background 0.3s;
+      }
+      .select select:hover, .select select:focus { background: var(--glass-2); border-color: var(--hair-2); }
+      .select select option { background: #111216; color: var(--ink); }
+      .select svg { height: 12px; pointer-events: none; position: absolute; right: 20px; top: 19px; width: 12px; }
       .note { color: var(--ink-3); font-size: 13px; min-height: 20px; margin: 0 0 30px; }
       .note.good { color: #c9f0da; }
 
@@ -292,7 +303,10 @@
           <h2 id="t-import">Start where you <em>left off.</em></h2>
           <p class="sub">Copy your bookmarks and history from another browser on this computer. Nothing is removed from it.</p>
           <div>
-            <div class="sources" id="sources" role="group" aria-label="Browser to import from"></div>
+            <div class="sources">
+              <span class="select"><select id="import-source" aria-label="Browser to import from"></select><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.5l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" /></svg></span>
+              <button class="ghost" id="import" type="button">Import</button>
+            </div>
             <p class="note" id="import-note" role="status"></p>
           </div>
           <div class="actions">
@@ -494,22 +508,17 @@
       // ---- Import ----------------------------------------------------------------------
       let importing = false;
       function renderSources(sources) {
-        byId("sources").replaceChildren(...sources.map((source) => {
-          const button = document.createElement("button");
-          button.type = "button";
-          button.className = "ghost";
-          button.textContent = `Import from ${source.name}`;
-          button.addEventListener("click", () => {
-            if (importing) return;
-            importing = true;
-            for (const b of byId("sources").children) b.disabled = true;
-            byId("import-note").className = "note";
-            byId("import-note").textContent = `Gathering from ${source.name}…`;
-            send({ type: "import", source: source.id });
-          });
-          return button;
-        }));
+        byId("import-source").replaceChildren(...sources.map((source) =>
+          Object.assign(document.createElement("option"), { value: source.id, textContent: source.name })));
       }
+      byId("import").addEventListener("click", () => {
+        if (importing) return;
+        importing = true;
+        byId("import").disabled = byId("import-source").disabled = true;
+        byId("import-note").className = "note";
+        byId("import-note").textContent = "Bringing things over…";
+        send({ type: "import", source: byId("import-source").value });
+      });
 
       // ---- Platforms -------------------------------------------------------------------
       const chosen = new Set();
@@ -618,7 +627,7 @@
           renderProgress();
         } else if (event.type === "importResult") {
           importing = false;
-          for (const b of byId("sources").children) b.disabled = false;
+          byId("import").disabled = byId("import-source").disabled = false;
           byId("import-note").className = "note good";
           byId("import-note").textContent = `Brought over ${event.bookmarks} bookmarks and ${event.history} history entries.`;
         } else if (event.type === "platforms") {
