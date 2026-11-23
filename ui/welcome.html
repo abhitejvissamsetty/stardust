@@ -3,194 +3,635 @@
   <head>
     <meta charset="utf-8" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
+    <meta name="color-scheme" content="dark" />
     <title>Welcome to Stardust</title>
     <style>
       /*TOKENS*/
+      /* The welcome page is always night: it takes its look from the icon, a glass orb with
+         a silver ribbon and a star at its heart. */
+      :root {
+        color-scheme: dark;
+        --void: #030305;
+        --ink: #f4f4f6;
+        --ink-2: rgb(236 238 245 / 62%);
+        --ink-3: rgb(236 238 245 / 38%);
+        --hair: rgb(255 255 255 / 9%);
+        --hair-2: rgb(255 255 255 / 16%);
+        --glass: rgb(255 255 255 / 3.5%);
+        --glass-2: rgb(255 255 255 / 7%);
+        --serif: ui-serif, "New York", "Iowan Old Style", Georgia, serif;
+        --sans: -apple-system, "SF Pro Display", system-ui, "Segoe UI Variable Display", "Segoe UI", "Noto Sans", sans-serif;
+        --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        --ease: cubic-bezier(0.16, 1, 0.3, 1);
+      }
       * { box-sizing: border-box; }
-      html, body { margin: 0; min-height: 100%; }
-      body { background: var(--page); color: var(--text); font: var(--text-md) var(--font-ui); line-height: 1.5; }
-      button, input, select { font: inherit; }
-      main { margin: 0 auto; max-width: 760px; padding: 56px 24px 80px; }
-      .hero { text-align: center; margin-bottom: 36px; }
-      .star { height: 64px; width: 64px; }
-      h1 { font-size: 34px; letter-spacing: -0.02em; margin: 14px 0 8px; }
-      .lead { color: var(--text-muted); font-size: 17px; margin: 0 auto; max-width: 520px; }
-      .card { background: var(--surface); border: 1px solid var(--divider); border-radius: 14px; margin-bottom: 16px; padding: 22px 24px; }
-      .card h2 { align-items: center; display: flex; font-size: 18px; gap: 10px; margin: 0 0 4px; }
-      .num { align-items: center; background: var(--accent); border-radius: 50%; color: var(--on-accent); display: inline-flex; flex: none; font-size: 13px; font-weight: 700; height: 24px; justify-content: center; width: 24px; }
-      .card p { color: var(--text-muted); margin: 0 0 14px; }
-      .row { align-items: center; display: flex; flex-wrap: wrap; gap: 10px; }
-      select, input[type="text"] { background: var(--field); border: 1px solid transparent; border-radius: 8px; color: var(--text); height: 36px; outline: none; padding: 0 12px; }
-      select:focus, input[type="text"]:focus { background: var(--field-focus); border-color: var(--accent); }
-      input[type="text"] { flex: 1; min-width: 180px; }
-      .btn { background: var(--field); border: 0; border-radius: 8px; color: var(--text); cursor: default; height: 36px; padding: 0 16px; }
-      .btn:hover { background: var(--press); }
-      .btn:disabled { color: var(--text-disabled); }
-      .btn.primary { background: var(--accent); color: var(--on-accent); font-weight: 600; }
-      .btn.primary:hover { background: var(--accent); filter: brightness(1.08); }
-      .btn.big { font-size: 16px; height: 46px; padding: 0 28px; }
-      .hint { color: var(--text-muted); font-size: var(--text-sm); min-height: 20px; }
-      .chips { display: flex; flex-wrap: wrap; gap: 8px; }
-      .chip { background: var(--page); border: 1px solid var(--divider); border-radius: 999px; color: var(--text); cursor: default; height: 34px; padding: 0 16px; }
-      .chip:hover { background: var(--hover); }
-      .chip[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 600; }
-      .colors { display: flex; gap: 8px; }
-      .dot { border: 3px solid transparent; border-radius: 50%; cursor: default; height: 26px; padding: 0; width: 26px; }
-      .dot[aria-pressed="true"] { border-color: var(--text); }
-      .tips { display: grid; gap: 10px 24px; grid-template-columns: 1fr 1fr; margin: 0; padding: 0; list-style: none; }
-      .tips li { color: var(--text-muted); font-size: 14px; }
-      .tips b { color: var(--text); font-weight: 600; }
-      kbd { background: var(--field); border: 1px solid var(--divider); border-radius: 5px; color: var(--text); font: 12px ui-monospace, Menlo, monospace; padding: 1px 6px; }
-      .done { margin-top: 28px; text-align: center; }
-      .done .hint { margin-top: 10px; }
-      .error { color: var(--warn-text); }
+      html, body { height: 100%; margin: 0; }
+      body {
+        background: radial-gradient(120% 80% at 50% 115%, #0d0f16 0%, var(--void) 60%) fixed, var(--void);
+        color: var(--ink);
+        font: 15px/1.55 var(--sans);
+        -webkit-font-smoothing: antialiased;
+        overflow: hidden;
+        user-select: none;
+      }
+      button, input { font: inherit; color: inherit; }
+      button { cursor: default; }
       [hidden] { display: none !important; }
-      @media (max-width: 560px) { .tips { grid-template-columns: 1fr; } }
+      ::selection { background: rgb(255 255 255 / 22%); }
+
+      /* Sky */
+      #sky { inset: 0; position: fixed; z-index: 0; }
+      .haze {
+        background:
+          radial-gradient(40% 32% at 50% 38%, rgb(190 205 255 / 7%), transparent 70%),
+          radial-gradient(30% 24% at 18% 82%, rgb(255 255 255 / 2.5%), transparent 70%);
+        inset: 0; pointer-events: none; position: fixed; z-index: 0;
+      }
+      .grain { height: 100%; inset: 0; mix-blend-mode: overlay; opacity: 0.55; pointer-events: none; position: fixed; width: 100%; z-index: 1; }
+
+      /* Frame */
+      .frame { display: grid; grid-template-rows: auto 1fr auto; height: 100%; position: relative; z-index: 2; }
+      header, footer { align-items: center; display: flex; justify-content: space-between; padding: 26px 34px; position: relative; }
+      header .constellation { left: 50%; position: absolute; transform: translateX(-50%); }
+      .mark { align-items: center; color: var(--ink-2); display: flex; font-size: 13px; gap: 10px; letter-spacing: 0.02em; }
+      .mark svg { height: 14px; width: 14px; }
+      .quiet {
+        background: none; border: 0; border-radius: 999px; color: var(--ink-3); font-size: 13px; padding: 6px 12px;
+        transition: color 0.3s, background 0.3s;
+      }
+      .quiet:hover { background: var(--glass-2); color: var(--ink); }
+
+      /* Constellation progress */
+      .constellation { align-items: center; display: flex; gap: 0; opacity: 0; transition: opacity 0.6s var(--ease); }
+      .constellation.on { opacity: 1; }
+      .constellation .node { height: 9px; position: relative; width: 9px; }
+      .constellation .node::before {
+        background: var(--ink-3); border-radius: 50%; content: ""; height: 3px; left: 3px; position: absolute; top: 3px; width: 3px;
+        transition: all 0.6s var(--ease);
+      }
+      .constellation .node.lit::before { background: var(--ink); box-shadow: 0 0 8px 1px rgb(255 255 255 / 55%); }
+      .constellation .node.here::before { height: 5px; left: 2px; top: 2px; width: 5px; }
+      .constellation .link { background: var(--hair); height: 1px; position: relative; width: 34px; }
+      .constellation .link::after {
+        background: linear-gradient(90deg, rgb(255 255 255 / 70%), rgb(255 255 255 / 25%)); content: ""; inset: 0; position: absolute;
+        transform: scaleX(0); transform-origin: left; transition: transform 0.8s var(--ease);
+      }
+      .constellation .link.lit::after { transform: scaleX(1); }
+
+      /* Stage */
+      .stage { display: grid; min-height: 0; overflow-y: auto; padding: 8px 0; place-items: center; position: relative; }
+      .step {
+        grid-area: 1 / 1; max-width: 680px; padding: 0 28px; width: 100%;
+        opacity: 0; pointer-events: none; transform: translateY(14px); filter: blur(6px);
+        transition: opacity 0.7s var(--ease), transform 0.9s var(--ease), filter 0.7s var(--ease);
+      }
+      .step.shown { opacity: 1; pointer-events: auto; transform: none; filter: none; }
+      .step.gone { transform: translateY(-14px); }
+      .step > * { transition: opacity 0.8s var(--ease), transform 0.9s var(--ease); }
+      .step:not(.shown) > * { opacity: 0; transform: translateY(8px); }
+      .step.shown > :nth-child(2) { transition-delay: 0.06s; }
+      .step.shown > :nth-child(3) { transition-delay: 0.12s; }
+      .step.shown > :nth-child(4) { transition-delay: 0.18s; }
+      .step.shown > :nth-child(5) { transition-delay: 0.24s; }
+
+      .eyebrow { color: var(--ink-3); font: 11px/1 var(--mono); letter-spacing: 0.22em; margin: 0 0 22px; text-transform: uppercase; }
+      h2 {
+        font-size: clamp(34px, 5vw, 52px); font-weight: 500; letter-spacing: -0.035em; line-height: 1.04; margin: 0 0 16px;
+        background: linear-gradient(180deg, #ffffff 30%, #b9bcc8); -webkit-background-clip: text; background-clip: text; color: transparent;
+      }
+      em { font-family: var(--serif); font-style: italic; font-weight: 400; letter-spacing: -0.02em; }
+      .sub { color: var(--ink-2); font-size: 16px; margin: 0 0 38px; max-width: 500px; }
+
+      /* Intro */
+      .intro { text-align: center; }
+      .intro .sub { margin-left: auto; margin-right: auto; }
+      .orb { display: block; height: min(300px, 34vh); margin: 0 auto 26px; overflow: visible; width: min(300px, 34vh); }
+      .orb .ribbon { animation: drift 18s ease-in-out infinite alternate; transform-origin: 150px 150px; }
+      .orb .spark { animation: breathe 5s ease-in-out infinite; transform-origin: 150px 150px; }
+      .orb .rider { animation: orbit 14s linear infinite; transform-origin: 150px 150px; }
+      @keyframes drift { from { transform: rotate(-24deg); } to { transform: rotate(-14deg); } }
+      @keyframes breathe { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(0.9); opacity: 0.82; } }
+      @keyframes orbit { to { transform: rotate(360deg); } }
+      .wordmark {
+        font-size: clamp(56px, 9vw, 104px); font-weight: 300; letter-spacing: -0.055em; line-height: 0.95; margin: 0 0 18px;
+        background: linear-gradient(180deg, #ffffff 35%, #8d91a0 100%); -webkit-background-clip: text; background-clip: text; color: transparent;
+      }
+      .wordmark span { display: block; font-family: var(--serif); font-size: 0.28em; font-style: italic; font-weight: 400; letter-spacing: -0.01em; margin-bottom: 0.15em; color: var(--ink-2); -webkit-text-fill-color: var(--ink-2); }
+
+      /* Buttons */
+      .actions { align-items: center; display: flex; gap: 14px; }
+      .intro .actions { justify-content: center; }
+      .go {
+        align-items: center; background: var(--ink); border: 0; border-radius: 999px; color: #07070a; display: inline-flex; font-size: 15px; font-weight: 600;
+        gap: 10px; height: 50px; letter-spacing: -0.01em; padding: 0 26px 0 28px; position: relative;
+        box-shadow: 0 0 0 1px rgb(255 255 255 / 40%), 0 10px 40px -8px rgb(200 210 255 / 45%);
+        transition: transform 0.4s var(--ease), box-shadow 0.4s var(--ease), opacity 0.3s;
+      }
+      .go:hover { box-shadow: 0 0 0 1px rgb(255 255 255 / 60%), 0 14px 60px -6px rgb(210 220 255 / 70%); transform: translateY(-1px); }
+      .go:active { transform: translateY(0) scale(0.98); }
+      .go:disabled { opacity: 0.5; }
+      .go svg { height: 14px; transition: transform 0.4s var(--ease); width: 14px; }
+      .go:hover svg { transform: translateX(3px); }
+      .ghost {
+        background: var(--glass); border: 1px solid var(--hair); border-radius: 999px; color: var(--ink-2); height: 50px; padding: 0 22px;
+        transition: background 0.3s, color 0.3s, border-color 0.3s;
+      }
+      .ghost:hover { background: var(--glass-2); border-color: var(--hair-2); color: var(--ink); }
+      .ghost:disabled { opacity: 0.5; }
+      .kbdhint { color: var(--ink-3); font-size: 12px; margin-left: 6px; }
+      .kbdhint b { border: 1px solid var(--hair-2); border-radius: 5px; font: 11px var(--mono); padding: 1px 5px; }
+      :focus-visible { outline: 1.5px solid rgb(255 255 255 / 80%); outline-offset: 3px; }
+
+      /* Import */
+      .sources { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; }
+      .note { color: var(--ink-3); font-size: 13px; min-height: 20px; margin: 0 0 30px; }
+      .note.good { color: #c9f0da; }
+
+      /* Platforms */
+      .platforms { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); margin-bottom: 38px; }
+      .pick {
+        align-items: center; background: var(--glass); border: 1px solid var(--hair); border-radius: 14px; display: flex; gap: 12px;
+        height: 52px; padding: 0 16px; position: relative; text-align: left; overflow: hidden;
+        transition: background 0.35s, border-color 0.35s, color 0.35s, transform 0.35s var(--ease);
+      }
+      .pick::after {
+        background: radial-gradient(60% 120% at 0% 50%, rgb(210 220 255 / 16%), transparent 70%); content: ""; inset: 0; opacity: 0; position: absolute;
+        transition: opacity 0.5s;
+      }
+      .pick, .ghost { -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); }
+      .pick:hover { background: var(--glass-2); border-color: var(--hair-2); }
+      .pick:active { transform: scale(0.98); }
+      .pick .glyph { flex: none; height: 14px; position: relative; width: 14px; z-index: 1; }
+      .pick .glyph path { fill: none; stroke: var(--ink-3); stroke-width: 1.2; transition: all 0.4s var(--ease); }
+      .pick .name { color: var(--ink-2); font-size: 14px; position: relative; transition: color 0.3s; white-space: nowrap; z-index: 1; overflow: hidden; text-overflow: ellipsis; }
+      .pick[aria-pressed="true"] { background: rgb(255 255 255 / 8%); border-color: rgb(255 255 255 / 34%); }
+      .pick[aria-pressed="true"]::after { opacity: 1; }
+      .pick[aria-pressed="true"] .name { color: var(--ink); }
+      .pick[aria-pressed="true"] .glyph path { fill: #fff; stroke: #fff; filter: drop-shadow(0 0 4px rgb(255 255 255 / 90%)); }
+      .count { color: var(--ink-3); font-size: 13px; }
+
+      /* Workspace */
+      .field { align-items: center; border-bottom: 1px solid var(--hair-2); display: flex; gap: 16px; margin-bottom: 26px; padding-bottom: 10px; transition: border-color 0.4s; }
+      .field:focus-within { border-color: rgb(255 255 255 / 55%); }
+      .field .halo { border-radius: 50%; flex: none; height: 14px; width: 14px; transition: background 0.4s, box-shadow 0.4s; }
+      .field input {
+        background: none; border: 0; flex: 1; font-size: clamp(24px, 3.4vw, 32px); font-weight: 400; letter-spacing: -0.025em; min-width: 0; outline: none; padding: 6px 0;
+        user-select: text;
+      }
+      .field input::placeholder { color: rgb(255 255 255 / 20%); }
+      .swatches { display: flex; gap: 12px; margin-bottom: 14px; }
+      .swatch {
+        border: 0; border-radius: 50%; height: 22px; padding: 0; position: relative; width: 22px;
+        transition: transform 0.35s var(--ease);
+      }
+      .swatch::after { border: 1px solid transparent; border-radius: 50%; content: ""; inset: -5px; position: absolute; transition: border-color 0.3s; }
+      .swatch:hover { transform: scale(1.12); }
+      .swatch[aria-pressed="true"]::after { border-color: rgb(255 255 255 / 75%); }
+      .error { color: #ffb3ab; font-size: 13px; min-height: 20px; margin: 0 0 22px; }
+
+      /* Finale */
+      .keys { border-top: 1px solid var(--hair); display: grid; grid-template-columns: 1fr 1fr; margin: 0 0 40px; padding: 0; list-style: none; }
+      .keys li { align-items: baseline; border-bottom: 1px solid var(--hair); display: flex; gap: 14px; justify-content: space-between; padding: 14px 0; }
+      .keys li:nth-child(odd) { padding-right: 24px; }
+      .keys li:nth-child(even) { border-left: 1px solid var(--hair); padding-left: 24px; }
+      .keys span { color: var(--ink-2); font-size: 14px; }
+      .keys kbd { color: var(--ink); font: 500 13px var(--sans); letter-spacing: 0.12em; white-space: nowrap; }
+      .summary { color: var(--ink-2); font-size: 16px; margin: 0 0 30px; max-width: 520px; min-height: 22px; }
+      .summary b { color: var(--ink); font-weight: 500; }
+
+      footer { color: var(--ink-3); font-size: 12px; }
+      footer .meta { letter-spacing: 0.02em; }
+
+      @media (max-width: 620px) {
+        header, footer { padding: 18px 18px; }
+        .keys { grid-template-columns: 1fr; }
+        .keys li:nth-child(even) { border-left: 0; padding-left: 0; }
+        .keys li:nth-child(odd) { padding-right: 0; }
+        .kbdhint { display: none; }
+      }
+      @media (max-height: 640px) { .orb { height: 160px; width: 160px; margin-bottom: 14px; } }
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after { animation: none !important; transition-duration: 0.01ms !important; transition-delay: 0s !important; }
+      }
     </style>
   </head>
   <body>
-    <main>
-      <div class="hero">
-        <svg class="star" viewBox="0 0 64 64" aria-hidden="true">
-          <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7ba4ff" /><stop offset="1" stop-color="#8b5cf6" /></linearGradient></defs>
-          <path d="M32 4l7 19 19 7-19 7-7 19-7-19-19-7 19-7z" fill="url(#g)" />
-        </svg>
-        <h1>Welcome to Stardust</h1>
-        <p class="lead">A browser for people who make things. Set it up in a minute, or skip straight to browsing. You can change all of this later.</p>
-      </div>
+    <canvas id="sky" aria-hidden="true"></canvas>
+    <div class="haze" aria-hidden="true"></div>
+    <svg class="grain" aria-hidden="true"><filter id="noise"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch" /><feColorMatrix values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.07 0" /></filter><rect width="100%" height="100%" filter="url(#noise)" /></svg>
 
-      <section class="card" id="import-card" hidden>
-        <h2><span class="num">1</span> Bring your things over</h2>
-        <p>Copy your bookmarks and history from another browser on this computer. Nothing is deleted from it.</p>
-        <div class="row">
-          <select id="import-source" aria-label="Browser to import from"></select>
-          <button class="btn" id="import" type="button">Import</button>
+    <div class="frame">
+      <header>
+        <div class="mark">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1.5C12.7 8.2 15.8 11.3 22.5 12 15.8 12.7 12.7 15.8 12 22.5 11.3 15.8 8.2 12.7 1.5 12 8.2 11.3 11.3 8.2 12 1.5Z" fill="currentColor" /></svg>
+          Stardust
         </div>
-        <div class="hint" id="import-hint" role="status"></div>
-      </section>
+        <div class="constellation" id="progress" aria-hidden="true"></div>
+        <button class="quiet" id="skip" type="button">Skip setup</button>
+      </header>
 
-      <section class="card">
-        <h2><span class="num" id="n-platforms">1</span> Where do you post?</h2>
-        <p>Pick the places you work in. They're added to your bookmarks so they're one click away.</p>
-        <div class="chips" id="platforms" role="group" aria-label="Platforms"></div>
-      </section>
+      <main class="stage">
+        <!-- 0 · Intro -->
+        <section class="step intro" data-step="intro" aria-labelledby="t-intro">
+          <svg class="orb" viewBox="0 0 300 300" aria-hidden="true">
+            <defs>
+              <radialGradient id="glass" cx="50%" cy="50%" r="50%">
+                <stop offset="0.72" stop-color="#000" stop-opacity="0" />
+                <stop offset="0.93" stop-color="#ffffff" stop-opacity="0.08" />
+                <stop offset="1" stop-color="#ffffff" stop-opacity="0.32" />
+              </radialGradient>
+              <linearGradient id="rim" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stop-color="#fff" stop-opacity="0.9" />
+                <stop offset="0.45" stop-color="#fff" stop-opacity="0.08" />
+                <stop offset="1" stop-color="#fff" stop-opacity="0.55" />
+              </linearGradient>
+              <linearGradient id="band" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0" stop-color="#fff" stop-opacity="0.15" />
+                <stop offset="0.35" stop-color="#e9ecf5" stop-opacity="0.95" />
+                <stop offset="0.65" stop-color="#9aa0b0" stop-opacity="0.6" />
+                <stop offset="1" stop-color="#fff" stop-opacity="0.9" />
+              </linearGradient>
+              <radialGradient id="core" cx="50%" cy="50%" r="50%">
+                <stop offset="0" stop-color="#fff" stop-opacity="0.95" />
+                <stop offset="0.25" stop-color="#dfe6ff" stop-opacity="0.35" />
+                <stop offset="1" stop-color="#fff" stop-opacity="0" />
+              </radialGradient>
+              <filter id="soft" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="2.2" /></filter>
+              <filter id="bloom" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="10" /></filter>
+              <clipPath id="front"><rect x="0" y="150" width="300" height="150" /></clipPath>
+            </defs>
+            <circle cx="150" cy="150" r="128" fill="url(#glass)" />
+            <circle cx="150" cy="150" r="127.5" fill="none" stroke="url(#rim)" stroke-width="1.2" />
+            <circle cx="150" cy="150" r="128" fill="none" stroke="#fff" stroke-opacity="0.18" stroke-width="6" filter="url(#soft)" />
+            <path d="M58 92 A128 128 0 0 1 150 22" fill="none" stroke="#fff" stroke-opacity="0.35" stroke-width="1" filter="url(#soft)" />
+            <g class="ribbon">
+              <!-- back half of the ribbon, behind the star -->
+              <ellipse cx="150" cy="150" rx="118" ry="44" fill="none" stroke="url(#band)" stroke-width="9" stroke-opacity="0.35" />
+            </g>
+            <g class="spark">
+              <circle cx="150" cy="150" r="70" fill="url(#core)" filter="url(#bloom)" />
+              <path d="M150 50 C153 120 160 147 222 150 C160 153 153 180 150 250 C147 180 140 153 78 150 C140 147 147 120 150 50Z" fill="#fff" />
+              <circle cx="150" cy="150" r="5" fill="#fff" filter="url(#soft)" />
+            </g>
+            <g class="ribbon" clip-path="url(#front)">
+              <ellipse cx="150" cy="150" rx="118" ry="44" fill="none" stroke="url(#band)" stroke-width="9" />
+              <ellipse cx="150" cy="150" rx="118" ry="44" fill="none" stroke="#fff" stroke-opacity="0.8" stroke-width="1" transform="translate(0 -3.5)" />
+            </g>
+            <g class="rider"><circle cx="150" cy="14" r="1.6" fill="#fff" /><circle cx="150" cy="14" r="5" fill="#fff" opacity="0.25" filter="url(#soft)" /></g>
+          </svg>
+          <h1 class="wordmark" id="t-intro"><span>Welcome to</span>Stardust</h1>
+          <p class="sub">A browser for people who <em>make</em> things. Let's set it up. It takes about a minute, and you can change all of it later.</p>
+          <div class="actions">
+            <button class="go" id="begin" type="button">Begin <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg></button>
+          </div>
+        </section>
 
-      <section class="card">
-        <h2><span class="num" id="n-workspace">2</span> Make your first workspace</h2>
-        <p>A workspace keeps its own logins, tabs and cookies, so you can sign in to a few channels or brands side by side without mixing them up. Leave it empty to skip.</p>
-        <div class="row">
-          <input id="workspace" type="text" maxlength="40" placeholder="For example: My channel" aria-label="Workspace name" autocomplete="off" />
-          <div class="colors" id="colors" role="group" aria-label="Workspace colour"></div>
-        </div>
-        <div class="hint error" id="workspace-error" role="alert"></div>
-      </section>
+        <!-- Import (only when another browser is found) -->
+        <section class="step" data-step="import" aria-labelledby="t-import">
+          <p class="eyebrow" data-eyebrow>Bring it with you</p>
+          <h2 id="t-import">Start where you <em>left off.</em></h2>
+          <p class="sub">Copy your bookmarks and history from another browser on this computer. Nothing is removed from it.</p>
+          <div>
+            <div class="sources" id="sources" role="group" aria-label="Browser to import from"></div>
+            <p class="note" id="import-note" role="status"></p>
+          </div>
+          <div class="actions">
+            <button class="go" data-next type="button">Continue <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg></button>
+            <button class="ghost" data-back type="button">Back</button>
+          </div>
+        </section>
 
-      <section class="card">
-        <h2><span class="num" id="n-tips">3</span> Good to know</h2>
-        <ul class="tips" id="tips"></ul>
-      </section>
+        <!-- Platforms -->
+        <section class="step" data-step="platforms" aria-labelledby="t-platforms">
+          <p class="eyebrow" data-eyebrow>Your orbit</p>
+          <h2 id="t-platforms">Where do you <em>create?</em></h2>
+          <p class="sub">Choose the places you work. They're saved to your bookmarks, one click away.</p>
+          <div class="platforms" id="platforms" role="group" aria-label="Platforms"></div>
+          <div class="actions">
+            <button class="go" data-next type="button">Continue <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg></button>
+            <button class="ghost" data-back type="button">Back</button>
+            <span class="count" id="count"></span>
+          </div>
+        </section>
 
-      <div class="done">
-        <button class="btn primary big" id="finish" type="button">Start browsing</button>
-        <div class="hint">You can open this page again from the command bar: search "Welcome".</div>
-      </div>
-    </main>
+        <!-- Workspace -->
+        <section class="step" data-step="workspace" aria-labelledby="t-workspace">
+          <p class="eyebrow" data-eyebrow>A world of its own</p>
+          <h2 id="t-workspace">Name your first <em>workspace.</em></h2>
+          <p class="sub">Each workspace keeps its own logins, tabs and cookies, so channels and brands live side by side without crossing over. Leave it blank to skip.</p>
+          <div>
+            <label class="field">
+              <span class="halo" id="halo" aria-hidden="true"></span>
+              <input id="workspace" type="text" maxlength="40" placeholder="My channel" aria-label="Workspace name" autocomplete="off" spellcheck="false" />
+            </label>
+            <div class="swatches" id="colors" role="group" aria-label="Workspace colour"></div>
+            <p class="error" id="workspace-error" role="alert"></p>
+          </div>
+          <div class="actions">
+            <button class="go" data-next type="button">Continue <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg></button>
+            <button class="ghost" data-back type="button">Back</button>
+            <span class="kbdhint">or press <b>Return</b></span>
+          </div>
+        </section>
+
+        <!-- Finale -->
+        <section class="step" data-step="done" aria-labelledby="t-done">
+          <p class="eyebrow" data-eyebrow>Ready</p>
+          <h2 id="t-done">The sky is <em>yours.</em></h2>
+          <p class="summary" id="summary"></p>
+          <ul class="keys" id="keys"></ul>
+          <div class="actions">
+            <button class="go" id="finish" type="button">Start browsing <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg></button>
+            <button class="ghost" data-back type="button">Back</button>
+          </div>
+        </section>
+      </main>
+
+      <footer>
+        <span class="meta">Open this again any time: search “Welcome” in the command bar.</span>
+        <span class="meta" id="stepcount"></span>
+      </footer>
+    </div>
+
     <script>
       "use strict";
       const send = (command) => window.browserBridge.send(JSON.stringify(command));
       const byId = (id) => document.getElementById(id);
       const mac = /Mac/i.test(navigator.platform || "");
-      const mod = mac ? "⌘" : "Ctrl+";
-      const shift = mac ? "⇧" : "Shift+";
+      const mod = mac ? "⌘ " : "Ctrl ";
+      const shift = mac ? "⇧ " : "Shift ";
+      const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
+      const STAR = "M7 0.6C7.4 4.6 9.4 6.6 13.4 7 9.4 7.4 7.4 9.4 7 13.4 6.6 9.4 4.6 7.4 0.6 7 4.6 6.6 6.6 4.6 7 0.6Z";
 
-      const tips = [
+      // ---- Sky -------------------------------------------------------------------------
+      const sky = byId("sky");
+      const ctx = sky.getContext("2d");
+      let stars = [], width = 0, height = 0, pointerX = 0, pointerY = 0, lean = { x: 0, y: 0 };
+      let meteor = null, nextMeteor = performance.now() + 6000;
+      function seed() {
+        const ratio = Math.min(devicePixelRatio || 1, 2);
+        width = innerWidth; height = innerHeight;
+        sky.width = width * ratio; sky.height = height * ratio;
+        sky.style.width = width + "px"; sky.style.height = height + "px";
+        ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+        const count = Math.round((width * height) / 2600);
+        stars = Array.from({ length: count }, () => {
+          const depth = Math.random() ** 2.2;
+          return {
+            x: Math.random() * width, y: Math.random() * height, depth,
+            r: 0.25 + depth * 1.25, base: 0.18 + depth * 0.7,
+            speed: 0.4 + Math.random() * 1.6, phase: Math.random() * Math.PI * 2,
+            tint: Math.random() < 0.15 ? "210,220,255" : Math.random() < 0.06 ? "255,236,214" : "255,255,255",
+            flare: depth > 0.82 && Math.random() < 0.5,
+          };
+        });
+      }
+      function draw(now) {
+        ctx.clearRect(0, 0, width, height);
+        lean.x += (pointerX - lean.x) * 0.04; lean.y += (pointerY - lean.y) * 0.04;
+        const t = now / 1000;
+        for (const s of stars) {
+          const twinkle = calm ? 1 : 0.65 + 0.35 * Math.sin(t * s.speed + s.phase);
+          const a = s.base * twinkle;
+          let x = s.x - lean.x * s.depth * 14 + (calm ? 0 : t * s.depth * 1.6);
+          x = ((x % width) + width) % width;
+          const y = s.y - lean.y * s.depth * 14;
+          ctx.fillStyle = `rgba(${s.tint},${a})`;
+          ctx.beginPath(); ctx.arc(x, y, s.r, 0, Math.PI * 2); ctx.fill();
+          if (s.flare) {
+            const len = 5 + s.r * 4 * twinkle;
+            ctx.strokeStyle = `rgba(${s.tint},${a * 0.45})`; ctx.lineWidth = 0.6;
+            ctx.beginPath(); ctx.moveTo(x - len, y); ctx.lineTo(x + len, y); ctx.moveTo(x, y - len); ctx.lineTo(x, y + len); ctx.stroke();
+          }
+        }
+        if (!calm) {
+          if (!meteor && now > nextMeteor) {
+            meteor = { x: Math.random() * width * 0.7 + width * 0.2, y: Math.random() * height * 0.35, born: now, angle: Math.PI * (0.78 + Math.random() * 0.08) };
+          }
+          if (meteor) {
+            const life = (now - meteor.born) / 1100;
+            if (life >= 1) { meteor = null; nextMeteor = now + 7000 + Math.random() * 9000; }
+            else {
+              const travel = life * 320, tail = 110 * Math.sin(Math.PI * life);
+              const hx = meteor.x + Math.cos(meteor.angle) * travel, hy = meteor.y + Math.sin(meteor.angle) * travel;
+              const tx = hx - Math.cos(meteor.angle) * tail, ty = hy - Math.sin(meteor.angle) * tail;
+              const g = ctx.createLinearGradient(hx, hy, tx, ty);
+              g.addColorStop(0, `rgba(255,255,255,${0.85 * Math.sin(Math.PI * life)})`); g.addColorStop(1, "rgba(255,255,255,0)");
+              ctx.strokeStyle = g; ctx.lineWidth = 1.1;
+              ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(tx, ty); ctx.stroke();
+            }
+          }
+          requestAnimationFrame(draw);
+        }
+      }
+      addEventListener("resize", () => { seed(); if (calm) draw(0); });
+      addEventListener("pointermove", (e) => { pointerX = e.clientX / width - 0.5; pointerY = e.clientY / height - 0.5; });
+      seed(); requestAnimationFrame(draw);
+
+      // ---- Steps -----------------------------------------------------------------------
+      const sections = Object.fromEntries([...document.querySelectorAll(".step")].map((el) => [el.dataset.step, el]));
+      let hasImport = false;
+      let flow = () => ["intro", ...(hasImport ? ["import"] : []), "platforms", "workspace", "done"];
+      let current = "intro";
+
+      function renderProgress() {
+        const steps = flow().slice(1);
+        const at = steps.indexOf(current);
+        const nodes = [];
+        steps.forEach((_, i) => {
+          if (i) {
+            const link = document.createElement("span");
+            link.className = "link" + (i <= at ? " lit" : "");
+            nodes.push(link);
+          }
+          const node = document.createElement("span");
+          node.className = "node" + (i <= at ? " lit" : "") + (i === at ? " here" : "");
+          nodes.push(node);
+        });
+        byId("progress").replaceChildren(...nodes);
+        byId("progress").classList.toggle("on", at >= 0);
+        byId("stepcount").textContent = at >= 0 ? `${String(at + 1).padStart(2, "0")} / ${String(steps.length).padStart(2, "0")}` : "";
+        byId("skip").style.visibility = current === "done" ? "hidden" : "";
+        steps.forEach((name, i) => {
+          const eyebrow = sections[name].querySelector("[data-eyebrow]");
+          if (eyebrow && !eyebrow.dataset.text) eyebrow.dataset.text = eyebrow.textContent;
+          if (eyebrow) eyebrow.textContent = `${String(i + 1).padStart(2, "0")} — ${eyebrow.dataset.text}`;
+        });
+      }
+
+      function show(name) {
+        const order = flow();
+        const forward = order.indexOf(name) > order.indexOf(current);
+        for (const [key, el] of Object.entries(sections)) {
+          const on = key === name;
+          el.classList.toggle("shown", on);
+          el.classList.toggle("gone", !on && forward && key === current);
+          el.inert = !on;
+          el.setAttribute("aria-hidden", String(!on));
+        }
+        current = name;
+        if (name === "done") renderSummary();
+        renderProgress();
+        setTimeout(() => {
+          if (name === "workspace") byId("workspace").focus({ preventScroll: true });
+          else sections[name].querySelector(".go")?.focus({ preventScroll: true });
+        }, 350);
+      }
+      const step = (delta) => { const order = flow(); show(order[Math.max(0, Math.min(order.length - 1, order.indexOf(current) + delta))]); };
+
+      byId("begin").addEventListener("click", () => step(1));
+      document.querySelectorAll("[data-next]").forEach((b) => b.addEventListener("click", () => step(1)));
+      document.querySelectorAll("[data-back]").forEach((b) => b.addEventListener("click", () => step(-1)));
+      byId("skip").addEventListener("click", () => {
+        chosen.clear(); byId("workspace").value = "";
+        finish();
+      });
+      addEventListener("keydown", (e) => {
+        if (e.key === "Enter" && !e.isComposing && document.activeElement?.id === "workspace") { e.preventDefault(); step(1); }
+        if (e.key === "Escape" && current !== "intro") step(-1);
+      });
+
+      // ---- Import ----------------------------------------------------------------------
+      let importing = false;
+      function renderSources(sources) {
+        byId("sources").replaceChildren(...sources.map((source) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "ghost";
+          button.textContent = `Import from ${source.name}`;
+          button.addEventListener("click", () => {
+            if (importing) return;
+            importing = true;
+            for (const b of byId("sources").children) b.disabled = true;
+            byId("import-note").className = "note";
+            byId("import-note").textContent = `Gathering from ${source.name}…`;
+            send({ type: "import", source: source.id });
+          });
+          return button;
+        }));
+      }
+
+      // ---- Platforms -------------------------------------------------------------------
+      const chosen = new Set();
+      let platformNames = {};
+      function renderPlatforms(platforms) {
+        platformNames = Object.fromEntries(platforms.map((p) => [p.id, p.name]));
+        byId("platforms").replaceChildren(...platforms.map((platform) => {
+          const pick = document.createElement("button");
+          pick.type = "button";
+          pick.className = "pick";
+          pick.setAttribute("aria-pressed", String(chosen.has(platform.id)));
+          const glyph = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+          glyph.setAttribute("viewBox", "0 0 14 14");
+          glyph.setAttribute("class", "glyph");
+          glyph.setAttribute("aria-hidden", "true");
+          const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+          path.setAttribute("d", STAR);
+          glyph.append(path);
+          const name = document.createElement("span");
+          name.className = "name";
+          name.textContent = platform.name;
+          pick.append(glyph, name);
+          pick.addEventListener("click", () => {
+            if (chosen.has(platform.id)) chosen.delete(platform.id); else chosen.add(platform.id);
+            pick.setAttribute("aria-pressed", String(chosen.has(platform.id)));
+            renderCount();
+          });
+          return pick;
+        }));
+        renderCount();
+      }
+      function renderCount() {
+        byId("count").textContent = chosen.size ? `${chosen.size} chosen` : "";
+      }
+
+      // ---- Workspace -------------------------------------------------------------------
+      const COLORS = ["blue", "green", "red", "amber", "purple", "pink", "teal", "gray"];
+      let color = "blue";
+      function paintHalo() {
+        byId("halo").style.background = `var(--ws-${color})`;
+        byId("halo").style.boxShadow = `0 0 18px 2px var(--ws-${color})`;
+      }
+      byId("colors").replaceChildren(...COLORS.map((name) => {
+        const swatch = document.createElement("button");
+        swatch.type = "button";
+        swatch.className = "swatch";
+        swatch.style.background = `var(--ws-${name})`;
+        swatch.title = name[0].toUpperCase() + name.slice(1);
+        swatch.setAttribute("aria-label", `Colour ${name}`);
+        swatch.setAttribute("aria-pressed", String(name === color));
+        swatch.addEventListener("click", () => {
+          color = name;
+          for (const other of byId("colors").children) other.setAttribute("aria-pressed", String(other === swatch));
+          paintHalo();
+        });
+        return swatch;
+      }));
+      paintHalo();
+      byId("workspace").addEventListener("input", () => { byId("workspace-error").textContent = ""; });
+
+      // ---- Finale ----------------------------------------------------------------------
+      const keys = [
         [`${mod}${shift}A`, "Search tabs and commands"],
         [`${mod}${shift}S`, "Clip a page"],
-        [`${mod}${shift}E`, "Side panel for clips and colours"],
+        [`${mod}${shift}E`, "Side panel"],
         [`${mod}${shift}N`, "Private window"],
         [`${mod}T`, "New tab"],
         [`${mod}F`, "Find on the page"],
       ];
-      byId("tips").replaceChildren(...tips.map(([keys, text]) => {
+      byId("keys").replaceChildren(...keys.map(([combo, text]) => {
         const item = document.createElement("li");
+        const label = document.createElement("span");
+        label.textContent = text;
         const key = document.createElement("kbd");
-        key.textContent = keys;
-        const label = document.createElement("b");
-        label.textContent = " " + text;
-        item.append(key, label);
+        key.textContent = combo;
+        item.append(label, key);
         return item;
       }));
 
-      // Platforms
-      const chosen = new Set();
-      function renderPlatforms(platforms) {
-        byId("platforms").replaceChildren(...platforms.map((platform) => {
-          const chip = document.createElement("button");
-          chip.type = "button";
-          chip.className = "chip";
-          chip.textContent = platform.name;
-          chip.setAttribute("aria-pressed", "false");
-          chip.addEventListener("click", () => {
-            if (chosen.has(platform.id)) chosen.delete(platform.id); else chosen.add(platform.id);
-            chip.setAttribute("aria-pressed", String(chosen.has(platform.id)));
-          });
-          return chip;
-        }));
+      function renderSummary() {
+        const line = byId("summary");
+        const names = [...chosen].map((id) => platformNames[id]).filter(Boolean);
+        const workspace = byId("workspace").value.trim();
+        const bold = (text) => Object.assign(document.createElement("b"), { textContent: text });
+        const parts = [];
+        if (names.length) parts.push([bold(names.length === 1 ? names[0] : `${names.length} places`), " to your bookmarks"]);
+        if (workspace) parts.push(["a workspace called ", bold(workspace)]);
+        line.replaceChildren();
+        if (!parts.length) { line.append("A few keys worth knowing before you go."); return; }
+        line.append("We'll add ", ...parts[0], ...(parts[1] ? [", and ", ...parts[1]] : []), ". A few keys worth knowing:");
       }
 
-      // Workspace colour
-      const COLORS = ["blue", "green", "red", "amber", "purple", "pink", "teal", "gray"];
-      let color = "blue";
-      byId("colors").replaceChildren(...COLORS.map((name) => {
-        const dot = document.createElement("button");
-        dot.type = "button";
-        dot.className = "dot";
-        dot.style.background = `var(--ws-${name})`;
-        dot.title = name;
-        dot.setAttribute("aria-label", `Colour ${name}`);
-        dot.setAttribute("aria-pressed", String(name === color));
-        dot.addEventListener("click", () => {
-          color = name;
-          for (const other of byId("colors").children) other.setAttribute("aria-pressed", String(other === dot));
-        });
-        return dot;
-      }));
-
-      // Import (shown only when another browser is found)
-      byId("import").addEventListener("click", () => {
-        byId("import").disabled = true;
-        byId("import-hint").textContent = "Importing…";
-        send({ type: "import", source: byId("import-source").value });
-      });
-
-      byId("finish").addEventListener("click", () => {
+      function finish() {
         byId("workspace-error").textContent = "";
         byId("finish").disabled = true;
+        byId("skip").disabled = true;
         send({ type: "finishWelcome", platforms: [...chosen], workspace: byId("workspace").value, color });
-      });
-
-      function renumber(hasImport) {
-        byId("n-platforms").textContent = hasImport ? "2" : "1";
-        byId("n-workspace").textContent = hasImport ? "3" : "2";
-        byId("n-tips").textContent = hasImport ? "4" : "3";
       }
+      byId("finish").addEventListener("click", finish);
 
+      // ---- Browser ---------------------------------------------------------------------
       window.onBrowserEvent = (event) => {
         if (event.type === "importSources") {
-          const options = event.sources.map((source) => Object.assign(document.createElement("option"), { value: source.id, textContent: source.name }));
-          byId("import-source").replaceChildren(...options);
-          byId("import-card").hidden = options.length === 0;
-          renumber(options.length > 0);
+          hasImport = event.sources.length > 0;
+          renderSources(event.sources);
+          renderProgress();
         } else if (event.type === "importResult") {
-          byId("import").disabled = false;
-          byId("import-hint").textContent = `Added ${event.bookmarks} bookmarks and ${event.history} history entries.`;
+          importing = false;
+          for (const b of byId("sources").children) b.disabled = false;
+          byId("import-note").className = "note good";
+          byId("import-note").textContent = `Brought over ${event.bookmarks} bookmarks and ${event.history} history entries.`;
         } else if (event.type === "platforms") {
           renderPlatforms(event.platforms);
         } else if (event.type === "welcomeResult" && event.error) {
           byId("finish").disabled = false;
+          byId("skip").disabled = false;
+          show("workspace");
           byId("workspace-error").textContent = event.error;
         }
       };
+
+      show("intro");
       send({ type: "listPlatforms" });
       send({ type: "listImportSources" });
     </script>
