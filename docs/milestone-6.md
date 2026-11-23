@@ -294,6 +294,46 @@ On macOS, with real input: making a clip, a snippet and an annotated screenshot 
 - **Saving other things into it,** such as pictures from a page, and videos.
 - Windows and Linux.
 
+## Menu bar, right-click menus and developer tools (macOS)
+
+**Menu bar**, like Chrome's: Stardust, File, Edit, View, History, Bookmarks, Profiles, Tab, Window, Help. Built natively (`crates/cef-host/src/menubar.rs`), with the shortcuts shown. Editing (undo, cut, copy, paste, paste and match style, select all), hide, minimize, zoom and quit go through Cocoa, so they act on whatever has focus. The rest runs on the window that was last in front.
+
+- **File:** new tab, window, private window; Open File; Open Location; Close Window; Close Tab; Save Page As (downloads the page's HTML); Print; two screenshot items.
+- **Edit:** the above, plus Find (find, next, previous) and "Search Tabs and Commands".
+- **View:** Stop, Reload, Force Reload, Full Screen, Actual Size, Zoom In and Out, Split View, Side Panel, Tabs Down the Side, and a **Developer** submenu: View Source, Developer Tools, Pick a Colour, Identify Fonts.
+- **History:** Back, Forward, Reopen Closed Tab, Show Full History (now Cmd+Y, as in Chrome, since Cmd+H is Hide on a Mac).
+- **Bookmarks:** Bookmark This Tab, Bookmark All Tabs, Bookmark Manager, Clip This Page, Library.
+- **Profiles:** the workspaces, with a tick by the one this window uses, and "Manage Workspaces".
+- **Tab:** New, Duplicate, Mute Site, Close, Close Other Tabs, Close Tabs to the Right, next and previous, move left and right, Select Tab 1 to 8 and the last.
+- **Window / Help:** minimize, zoom, Downloads, Extensions, bring all to front and the system's window list; Help has the system search box.
+- The app is now named "Stardust" in the menu bar.
+
+**Right-click menu**, laid out like Chrome's by what was clicked:
+- A **link:** open in new tab, new window, private window; save link; copy link address (or copy email address).
+- An **image:** open in new tab; save; **copy image** (a real picture on the clipboard); copy address.
+- **Video and audio:** open, save, copy address.
+- A **text field:** spelling suggestions and add to dictionary, undo, redo, cut, copy, paste, paste as plain text, select all.
+- **Selected text:** copy, search for the text (with your search engine), print.
+- **The page:** back, forward, reload, save as, print, copy page address, view page source.
+- **A frame inside a page:** view frame source, reload frame.
+- **Inspect** on everything.
+
+**Developer tools:** open from the menu, Cmd+Option+I or F12, and now **close the same way** (a second press closes them). They open in a larger window, and **Inspect** from the right-click menu opens them on the element you clicked. View Source opens `view-source:` in a new tab.
+
+### Tested (macOS, with real menu and key events)
+The menu bar's items listed through accessibility; Duplicate Tab, New Tab, Close Other Tabs, View Source and Developer Tools by clicking them; the DevTools Elements panel by screenshot; the link menu by screenshot; copy image address, copy image (PNG on the clipboard), open link in new tab and Inspect from the right-click menu using the keyboard.
+
+### Not tested or not built
+- **Windows and Linux:** the menu bar is macOS only (other systems have no menu bar here), and copying a link or image to the clipboard is macOS only for now.
+- **Not tried by hand:** open link in new window or private window, save link and image, search for selection, paste as plain text, spelling suggestions, frame source, Open File, Save Page As, Bookmark All Tabs, Close Tabs to the Right, and the Profiles items.
+- **Missing compared with Chrome:** Translate, Cast, "Search image with", the list of recent bookmarks and recently closed tabs in the menus, Always Show Bookmarks Bar, Pin Tab, JavaScript Console as its own item (it's inside Developer Tools), Customize, and Task Manager.
+- **Save Page As** saves the page's HTML only, not the images and styles.
+- **Full Screen** appears twice in the View menu (ours and macOS's own).
+- Right-click menu items' look comes from the system menu, so it follows the system theme.
+
+### Removed
+The side panel no longer has **Notes, To-do or Snippets**, only **Clips and Colours**. Snippets are gone from the Library too. Saved notes, to-dos and snippets stay in the data file untouched, and nothing reads them.
+
 ## Tests
 
 99 tests in `bridge` pass (13 new: workspace list rules, ids, colours, saved-data checks). Clippy and `cargo fmt` clean. In the running browser: cookie separation, persistence across a hard kill and restart, tab restoration, opening a workspace with saved tabs, duplicate-name and delete-while-open refusals, rename, create and delete, and the menu and Settings card by screenshot.

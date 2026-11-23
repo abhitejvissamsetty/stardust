@@ -1,6 +1,6 @@
 //! The asset library: everything a creator has kept, in one place with tags and search.
 //! It holds screenshots (their pictures are files; only their details are here) and a
-//! tag list, and gathers the side panel's clips, snippets and colours beside them.
+//! tag list, and gathers the side panel's clips and colours beside them.
 
 use std::collections::{BTreeMap, HashSet};
 
@@ -32,7 +32,7 @@ pub struct Shot {
 #[serde(default)]
 pub struct Library {
     pub shots: Vec<Shot>,
-    /// Tags by asset key, such as `clip:3`, `snippet:2`, `color:#FF8800` or `shot:1`.
+    /// Tags by asset key, such as `clip:3`, `color:#FF8800` or `shot:1`.
     pub tags: BTreeMap<String, Vec<String>>,
     next_id: u32,
 }
@@ -42,7 +42,6 @@ pub struct Library {
 pub enum AssetKind {
     Screenshot,
     Clip,
-    Snippet,
     Color,
 }
 
@@ -51,7 +50,6 @@ impl AssetKind {
         match id {
             "screenshot" => Some(Self::Screenshot),
             "clip" => Some(Self::Clip),
-            "snippet" => Some(Self::Snippet),
             "color" => Some(Self::Color),
             _ => None,
         }
@@ -65,7 +63,7 @@ pub struct Asset {
     pub key: String,
     pub kind: AssetKind,
     pub title: String,
-    /// What's kept besides the title: a clip's note and address, a snippet's text, a
+    /// What's kept besides the title: a clip's note and address, a
     /// colour's code, a screenshot's page.
     pub detail: String,
     pub tags: Vec<String>,
@@ -249,19 +247,13 @@ impl Library {
             .iter()
             .map(|shot| format!("shot:{}", shot.id))
             .chain(panel.clips.iter().map(|clip| format!("clip:{}", clip.id)))
-            .chain(
-                panel
-                    .snippets
-                    .iter()
-                    .map(|snippet| format!("snippet:{}", snippet.id)),
-            )
             .chain(panel.colors.iter().map(|color| format!("color:{color}")))
             .collect();
         self.tags.retain(|key, _| live.contains(key));
     }
 
     /// Everything kept, newest first: screenshots and clips by when they were saved, then
-    /// snippets and colours in the order they're kept in.
+    /// colours in the order they're kept in.
     pub fn assets(&self, panel: &SidePanelData) -> Vec<Asset> {
         let tags_of = |key: &str| self.tags.get(key).cloned().unwrap_or_default();
         let mut assets: Vec<Asset> = Vec::new();
@@ -299,20 +291,6 @@ impl Library {
             });
         }
         assets.sort_by_key(|asset| std::cmp::Reverse(asset.saved_ms));
-        for snippet in &panel.snippets {
-            let key = format!("snippet:{}", snippet.id);
-            assets.push(Asset {
-                tags: tags_of(&key),
-                key,
-                kind: AssetKind::Snippet,
-                title: snippet.title.clone(),
-                detail: snippet.text.clone(),
-                saved_ms: 0,
-                shot_id: None,
-                width: 0,
-                height: 0,
-            });
-        }
         for color in &panel.colors {
             let key = format!("color:{color}");
             assets.push(Asset {
@@ -384,7 +362,7 @@ mod tests {
             "ripple delete saves time",
             100,
         );
-        panel.add_snippet("Sign-off", "Thanks for watching!");
+        panel.add_clip("Sign-off", "https://b.example/", "Thanks for watching!", 90);
         panel.add_color("#ff8800");
         panel
     }
@@ -469,8 +447,8 @@ mod tests {
             kinds,
             [
                 AssetKind::Clip,
+                AssetKind::Clip,
                 AssetKind::Screenshot,
-                AssetKind::Snippet,
                 AssetKind::Color
             ]
         );
@@ -503,8 +481,8 @@ mod tests {
     fn counts_tags_most_used_first() {
         let mut library = Library::default();
         library.add_tag("clip:1", "b");
-        library.add_tag("snippet:2", "b");
-        library.add_tag("snippet:2", "a");
+        library.add_tag("clip:2", "b");
+        library.add_tag("clip:2", "a");
         let counts = tag_counts(&library.assets(&panel()));
         assert_eq!(counts, [("b".to_owned(), 2), ("a".to_owned(), 1)]);
     }

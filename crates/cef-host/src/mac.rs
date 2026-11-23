@@ -111,3 +111,28 @@ pub fn copy_png(png: &[u8]) -> bool {
         stored.as_bool()
     }
 }
+
+/// Puts plain text on the system clipboard. Call on the main thread.
+pub fn copy_text(text: &str) -> bool {
+    use objc2::{class, msg_send};
+    use std::ffi::CString;
+
+    let Ok(text) = CString::new(text) else {
+        return false;
+    };
+    // SAFETY: plain Cocoa calls on the main thread with NUL-terminated strings that
+    // outlive them.
+    unsafe {
+        let pasteboard: *mut AnyObject = msg_send![class!(NSPasteboard), generalPasteboard];
+        let value: *mut AnyObject =
+            msg_send![class!(NSString), stringWithUTF8String: text.as_ptr()];
+        let kind: *mut AnyObject =
+            msg_send![class!(NSString), stringWithUTF8String: c"public.utf8-plain-text".as_ptr()];
+        if pasteboard.is_null() || value.is_null() || kind.is_null() {
+            return false;
+        }
+        let _: isize = msg_send![pasteboard, clearContents];
+        let stored: Bool = msg_send![pasteboard, setString: value, forType: kind];
+        stored.as_bool()
+    }
+}

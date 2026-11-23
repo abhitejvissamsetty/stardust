@@ -763,6 +763,10 @@ fn publish_workspaces(shell: &SharedShell) {
     };
     send_to_toolbar(toolbar.as_ref(), &event);
     send_to_toolbar(sidebar_of(shell).as_ref(), &event);
+    #[cfg(target_os = "macos")]
+    if active_shell().is_some_and(|active| Arc::ptr_eq(&active, shell)) {
+        refresh_menu_profiles(shell);
+    }
 }
 
 fn publish_workspaces_everywhere() {
@@ -1238,7 +1242,49 @@ fn focus_active_tab(shell: &SharedShell) {
 
 /// The window became active, perhaps after a page's dialog closed. That leaves keyboard
 /// focus nowhere until something takes it, so shortcuts would stop working.
+/// The window that was last in front, which the menu bar's commands act on.
+static ACTIVE_WINDOW: Mutex<Option<SharedShell>> = Mutex::new(None);
+
+fn active_shell() -> Option<SharedShell> {
+    let remembered = ACTIVE_WINDOW
+        .lock()
+        .expect("Failed to lock the active window")
+        .clone()
+        .filter(|shell| {
+            let still_open = open_windows().iter().any(|open| Arc::ptr_eq(open, shell));
+            still_open && !lock(shell).window_closing
+        });
+    remembered.or_else(|| {
+        open_windows()
+            .into_iter()
+            .rev()
+            .find(|shell| !lock(shell).window_closing)
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn refresh_menu_profiles(shell: &SharedShell) {
+    let current = lock(shell).workspace.clone();
+    let profiles = workspace_items()
+        .iter()
+        .filter_map(|item| {
+            let id = item.get("id")?.as_str()?.to_owned();
+            Some(crate::menubar::Profile {
+                current: id == current,
+                name: item.get("name")?.as_str()?.to_owned(),
+                id,
+            })
+        })
+        .collect();
+    crate::menubar::set_profiles(profiles);
+}
+
 pub fn window_activated(shell: &SharedShell) {
+    *ACTIVE_WINDOW
+        .lock()
+        .expect("Failed to lock the active window") = Some(shell.clone());
+    #[cfg(target_os = "macos")]
+    refresh_menu_profiles(shell);
     let toolbar = lock(shell).toolbar.clone();
     if let Some(toolbar) = toolbar {
         focus_toolbar(&toolbar);
@@ -2924,6 +2970,11 @@ fn run_shortcut(shell: &SharedShell, event: &KeyEvent) -> bool {
         return false;
     };
 
+    perform_shortcut(shell, shortcut)
+}
+
+/// Runs a shortcut's command. False if it wasn't used, so the key goes to the page.
+fn perform_shortcut(shell: &SharedShell, shortcut: Shortcut) -> bool {
     let (page, strip) = (active_browser(shell), lock(shell).strip.clone());
     let select = |id: Option<TabId>| {
         if let Some(id) = id {
@@ -3345,6 +3396,10 @@ wrap_client! {
             Some(Shortcuts::new(self.shell.clone()))
         }
 
+        fn context_menu_handler(&self) -> Option<ContextMenuHandler> {
+            Some(PageContextMenu::new(self.shell.clone()))
+        }
+
         fn permission_handler(&self) -> Option<PermissionHandler> {
             Some(SitePermissionPrompts::new(self.shell.clone(), self.id))
         }
@@ -3415,6 +3470,369 @@ wrap_client! {
                 .unwrap_or_default();
             if let Ok(command) = serde_json::from_str(&json) {
                 run_page_command(&self.shell, self.id, frame, command);
+            }
+            1
+        }
+    }
+}
+
+// -- The right-click menu --------------------------------------------------------------
+//
+// Laid out like Chrome's: what's offered depends on what was clicked (a link, an image,
+// a video, selected text, a text field, or the page). The standard commands (back,
+// reload, cut, copy, paste, print and the rest) are CEF's own; the others are ours.
+
+const MENU_BACK: i32 = 100;
+const MENU_FORWARD: i32 = 101;
+const MENU_RELOAD: i32 = 102;
+const MENU_UNDO: i32 = 110;
+const MENU_REDO: i32 = 111;
+const MENU_CUT: i32 = 112;
+const MENU_COPY: i32 = 113;
+const MENU_PASTE: i32 = 114;
+const MENU_SELECT_ALL: i32 = 116;
+const MENU_PRINT: i32 = 131;
+const MENU_SPELL_FIRST: i32 = 200;
+const MENU_SPELL_LAST: i32 = 204;
+const MENU_ADD_TO_DICTIONARY: i32 = 206;
+const MENU_USER: i32 = 26_500;
+const CM_OPEN_LINK_TAB: i32 = MENU_USER + 1;
+const CM_OPEN_LINK_WINDOW: i32 = MENU_USER + 2;
+const CM_OPEN_LINK_PRIVATE: i32 = MENU_USER + 3;
+const CM_SAVE_LINK: i32 = MENU_USER + 4;
+const CM_COPY_LINK: i32 = MENU_USER + 5;
+const CM_OPEN_IMAGE_TAB: i32 = MENU_USER + 6;
+const CM_SAVE_IMAGE: i32 = MENU_USER + 7;
+const CM_COPY_IMAGE: i32 = MENU_USER + 8;
+const CM_COPY_IMAGE_ADDRESS: i32 = MENU_USER + 9;
+const CM_OPEN_MEDIA_TAB: i32 = MENU_USER + 10;
+const CM_SAVE_MEDIA: i32 = MENU_USER + 11;
+const CM_COPY_MEDIA_ADDRESS: i32 = MENU_USER + 12;
+const CM_PASTE_PLAIN: i32 = MENU_USER + 13;
+const CM_SEARCH: i32 = MENU_USER + 14;
+const CM_SAVE_PAGE: i32 = MENU_USER + 15;
+const CM_VIEW_SOURCE: i32 = MENU_USER + 16;
+const CM_VIEW_FRAME_SOURCE: i32 = MENU_USER + 17;
+const CM_RELOAD_FRAME: i32 = MENU_USER + 18;
+const CM_INSPECT: i32 = MENU_USER + 19;
+const CM_COPY_PAGE_ADDRESS: i32 = MENU_USER + 20;
+
+fn params_text(text: CefStringUserfree) -> String {
+    CefString::from(&text).to_string()
+}
+
+/// Cuts a long selection down for a menu label.
+fn short_label(text: &str) -> String {
+    let one_line: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if one_line.chars().count() > 30 {
+        format!("{}…", one_line.chars().take(30).collect::<String>())
+    } else {
+        one_line
+    }
+}
+
+fn build_context_menu(params: &ContextMenuParams, model: &MenuModel) {
+    let enabled = |id: i32| model.is_enabled(id) != 0;
+    let link = params_text(params.unfiltered_link_url());
+    let source = params_text(params.source_url());
+    let selection = params_text(params.selection_text());
+    let page = params_text(params.page_url());
+    let frame = params_text(params.frame_url());
+    let media = params.media_type();
+    let editable = params.is_editable() != 0;
+    let on_link = !link.is_empty();
+    let on_image = media == ContextMenuMediaType::IMAGE && !source.is_empty();
+    let on_media = (media == ContextMenuMediaType::VIDEO || media == ContextMenuMediaType::AUDIO)
+        && !source.is_empty();
+    let has_selection = !selection.trim().is_empty();
+    // Spelling suggestions are CEF's own and have to be kept for a misspelled word.
+    let spelling: Vec<(i32, String)> = (MENU_SPELL_FIRST..=MENU_SPELL_LAST)
+        .filter(|id| model.is_visible(*id) != 0 && model.index_of(*id) >= 0)
+        .map(|id| (id, CefString::from(&model.label(id)).to_string()))
+        .collect();
+    let can_add_word = model.index_of(MENU_ADD_TO_DICTIONARY) >= 0;
+    let flags = [
+        (MENU_BACK, enabled(MENU_BACK)),
+        (MENU_FORWARD, enabled(MENU_FORWARD)),
+        (MENU_UNDO, enabled(MENU_UNDO)),
+        (MENU_REDO, enabled(MENU_REDO)),
+        (MENU_CUT, enabled(MENU_CUT)),
+        (MENU_COPY, enabled(MENU_COPY)),
+        (MENU_PASTE, enabled(MENU_PASTE)),
+        (MENU_SELECT_ALL, enabled(MENU_SELECT_ALL)),
+    ];
+    let can = |id: i32| flags.iter().any(|(flag, on)| *flag == id && *on);
+
+    model.clear();
+    let add = |id: i32, label: &str, on: bool| {
+        model.add_item(id, Some(&CefString::from(label)));
+        model.set_enabled(id, on as i32);
+    };
+    let separator = || {
+        let count = model.count();
+        if count > 0 && model.type_at(count - 1) != MenuItemType::SEPARATOR {
+            model.add_separator();
+        }
+    };
+
+    if on_link {
+        let mail = link.starts_with("mailto:");
+        if !mail {
+            add(CM_OPEN_LINK_TAB, "Open link in new tab", true);
+            add(CM_OPEN_LINK_WINDOW, "Open link in new window", true);
+            add(CM_OPEN_LINK_PRIVATE, "Open link in private window", true);
+            separator();
+            add(CM_SAVE_LINK, "Save link as…", true);
+        }
+        add(
+            CM_COPY_LINK,
+            if mail {
+                "Copy email address"
+            } else {
+                "Copy link address"
+            },
+            true,
+        );
+        separator();
+    }
+    if on_image {
+        add(CM_OPEN_IMAGE_TAB, "Open image in new tab", true);
+        add(CM_SAVE_IMAGE, "Save image as…", true);
+        add(CM_COPY_IMAGE, "Copy image", true);
+        add(CM_COPY_IMAGE_ADDRESS, "Copy image address", true);
+        separator();
+    }
+    if on_media {
+        let kind = if media == ContextMenuMediaType::VIDEO {
+            "video"
+        } else {
+            "audio"
+        };
+        add(CM_OPEN_MEDIA_TAB, &format!("Open {kind} in new tab"), true);
+        add(CM_SAVE_MEDIA, &format!("Save {kind} as…"), true);
+        add(CM_COPY_MEDIA_ADDRESS, &format!("Copy {kind} address"), true);
+        separator();
+    }
+    if editable {
+        for (id, label) in &spelling {
+            add(*id, label, true);
+        }
+        if can_add_word {
+            add(MENU_ADD_TO_DICTIONARY, "Add to dictionary", true);
+        }
+        if !spelling.is_empty() || can_add_word {
+            separator();
+        }
+        add(MENU_UNDO, "Undo", can(MENU_UNDO));
+        add(MENU_REDO, "Redo", can(MENU_REDO));
+        separator();
+        add(MENU_CUT, "Cut", can(MENU_CUT));
+        add(MENU_COPY, "Copy", can(MENU_COPY));
+        add(MENU_PASTE, "Paste", can(MENU_PASTE));
+        add(CM_PASTE_PLAIN, "Paste as plain text", can(MENU_PASTE));
+        add(MENU_SELECT_ALL, "Select all", can(MENU_SELECT_ALL));
+        if has_selection {
+            separator();
+            add(
+                CM_SEARCH,
+                &format!("Search for “{}”", short_label(&selection)),
+                true,
+            );
+        }
+    } else if has_selection {
+        add(MENU_COPY, "Copy", true);
+        add(
+            CM_SEARCH,
+            &format!("Search for “{}”", short_label(&selection)),
+            true,
+        );
+        separator();
+        add(MENU_PRINT, "Print…", true);
+    } else if !on_link && !on_image && !on_media {
+        add(MENU_BACK, "Back", can(MENU_BACK));
+        add(MENU_FORWARD, "Forward", can(MENU_FORWARD));
+        add(MENU_RELOAD, "Reload", true);
+        separator();
+        add(CM_SAVE_PAGE, "Save as…", true);
+        add(MENU_PRINT, "Print…", true);
+        add(CM_COPY_PAGE_ADDRESS, "Copy page address", true);
+        separator();
+        add(CM_VIEW_SOURCE, "View page source", true);
+    }
+    if !frame.is_empty() && frame != page {
+        separator();
+        add(CM_VIEW_FRAME_SOURCE, "View frame source", true);
+        add(CM_RELOAD_FRAME, "Reload frame", true);
+    }
+    separator();
+    add(CM_INSPECT, "Inspect", true);
+}
+
+wrap_download_image_callback! {
+    struct ImageCopied;
+
+    impl DownloadImageCallback {
+        fn on_download_image_finished(
+            &self,
+            _image_url: Option<&CefString>,
+            _http_status_code: i32,
+            image: Option<&mut Image>,
+        ) {
+            let png = image.and_then(|image| {
+                let (mut width, mut height) = (0, 0);
+                [2.0, 1.0, 3.0].into_iter().find_map(|scale| {
+                    image.as_png(scale, 1, Some(&mut width), Some(&mut height))
+                })
+            });
+            if let Some(png) = png {
+                let mut bytes = vec![0u8; png.size()];
+                png.data(Some(&mut bytes), 0);
+                if !bytes.is_empty() {
+                    copy_png_to_clipboard(&bytes);
+                }
+            }
+        }
+    }
+}
+
+fn copy_text_to_clipboard(text: &str) {
+    #[cfg(target_os = "macos")]
+    {
+        crate::mac::copy_text(text);
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = text;
+    }
+}
+
+/// Opens a page in the same place a link would go: a new tab next to this one.
+fn open_in_new_tab(shell: &SharedShell, url: &str) {
+    if is_web_url(url) || url.starts_with("view-source:") {
+        let id = create_tab(shell, url);
+        attach_tab(shell, id);
+    }
+}
+
+wrap_context_menu_handler! {
+    struct PageContextMenu {
+        shell: SharedShell,
+    }
+
+    impl ContextMenuHandler {
+        fn on_before_context_menu(
+            &self,
+            _browser: Option<&mut Browser>,
+            _frame: Option<&mut Frame>,
+            params: Option<&mut ContextMenuParams>,
+            model: Option<&mut MenuModel>,
+        ) {
+            if let (Some(params), Some(model)) = (params, model) {
+                build_context_menu(params, model);
+            }
+        }
+
+        fn on_context_menu_command(
+            &self,
+            browser: Option<&mut Browser>,
+            frame: Option<&mut Frame>,
+            params: Option<&mut ContextMenuParams>,
+            command_id: i32,
+            _event_flags: EventFlags,
+        ) -> i32 {
+            if command_id < MENU_USER {
+                // CEF's own commands.
+                return 0;
+            }
+            let (Some(browser), Some(params)) = (browser, params) else {
+                return 1;
+            };
+            let host = browser.host();
+            let shell = &self.shell;
+            let link = params_text(params.unfiltered_link_url());
+            let source = params_text(params.source_url());
+            let page = params_text(params.page_url());
+            let frame_url = params_text(params.frame_url());
+            match command_id {
+                CM_OPEN_LINK_TAB => open_in_new_tab(shell, &link),
+                CM_OPEN_LINK_WINDOW if is_web_url(&link) => {
+                    open_window_in(None, &[link], is_private(shell), &workspace_of(shell));
+                }
+                CM_OPEN_LINK_PRIVATE if is_web_url(&link) => {
+                    open_window(None, &[link], true);
+                }
+                CM_SAVE_LINK if is_web_url(&link) => {
+                    if let Some(host) = &host {
+                        host.start_download(Some(&CefString::from(link.as_str())));
+                    }
+                }
+                CM_COPY_LINK => {
+                    copy_text_to_clipboard(link.strip_prefix("mailto:").unwrap_or(&link));
+                }
+                CM_OPEN_IMAGE_TAB | CM_OPEN_MEDIA_TAB => open_in_new_tab(shell, &source),
+                CM_SAVE_IMAGE | CM_SAVE_MEDIA if is_web_url(&source) => {
+                    if let Some(host) = &host {
+                        host.start_download(Some(&CefString::from(source.as_str())));
+                    }
+                }
+                CM_COPY_IMAGE_ADDRESS | CM_COPY_MEDIA_ADDRESS => copy_text_to_clipboard(&source),
+                CM_COPY_IMAGE => {
+                    if let Some(host) = &host {
+                        host.download_image(
+                            Some(&CefString::from(source.as_str())),
+                            0,
+                            0,
+                            0,
+                            Some(&mut ImageCopied::new()),
+                        );
+                    }
+                }
+                CM_PASTE_PLAIN => {
+                    if let Some(frame) = frame {
+                        frame.paste_and_match_style();
+                    }
+                }
+                CM_SEARCH => {
+                    let text = params_text(params.selection_text());
+                    let prefix = settings().search_engine.search_url();
+                    if let Some(url) = resolve_input(&format!("? {}", text.trim()), prefix)
+                        .or_else(|| resolve_input(text.trim(), prefix))
+                    {
+                        open_in_new_tab(shell, &url);
+                    }
+                }
+                CM_SAVE_PAGE if is_web_url(&page) => {
+                    if let Some(host) = &host {
+                        host.start_download(Some(&CefString::from(page.as_str())));
+                    }
+                }
+                CM_COPY_PAGE_ADDRESS => copy_text_to_clipboard(&page),
+                CM_VIEW_SOURCE if is_web_url(&page) => {
+                    open_in_new_tab(shell, &format!("view-source:{page}"));
+                }
+                CM_VIEW_FRAME_SOURCE if is_web_url(&frame_url) => {
+                    open_in_new_tab(shell, &format!("view-source:{frame_url}"));
+                }
+                CM_RELOAD_FRAME => {
+                    if let Some(frame) = frame {
+                        frame.execute_java_script(
+                            Some(&CefString::from("location.reload()")),
+                            None,
+                            0,
+                        );
+                    }
+                }
+                CM_INSPECT => {
+                    if let Some(host) = &host {
+                        let at = Point { x: params.xcoord(), y: params.ycoord() };
+                        let info = WindowInfo {
+                            bounds: Rect { x: 90, y: 70, width: 1180, height: 780 },
+                            ..Default::default()
+                        };
+                                                host.show_dev_tools(Some(&info), None, None, Some(&at));
+                    }
+                }
+                _ => {}
             }
             1
         }
@@ -5343,9 +5761,144 @@ fn print_page(shell: &SharedShell) {
     }
 }
 
+/// Opens the developer tools for the active tab, or closes them if they're open.
 fn show_dev_tools(shell: &SharedShell) {
     if let Some(host) = active_browser(shell).and_then(|browser| browser.host()) {
-        host.show_dev_tools(Some(&WindowInfo::default()), None, None, None);
+        if host.has_dev_tools() != 0 {
+            host.close_dev_tools();
+        } else {
+            let info = WindowInfo {
+                bounds: Rect {
+                    x: 90,
+                    y: 70,
+                    width: 1180,
+                    height: 780,
+                },
+                ..Default::default()
+            };
+            host.show_dev_tools(Some(&info), None, None, None);
+        }
+    }
+}
+
+wrap_run_file_dialog_callback! {
+    struct FileChosen {
+        shell: SharedShell,
+    }
+
+    impl RunFileDialogCallback {
+        fn on_file_dialog_dismissed(&self, file_paths: Option<&mut CefStringList>) {
+            let first = file_paths
+                .map(std::mem::take)
+                .and_then(|list| list.into_iter().next());
+            if let Some(path) = first {
+                let mut url = String::from("file://");
+                for byte in path.as_bytes() {
+                    match byte {
+                        b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'/' | b'-' | b'_' | b'.' | b'~' => {
+                            url.push(*byte as char)
+                        }
+                        other => url.push_str(&format!("%{other:02X}")),
+                    }
+                }
+                let id = create_tab(&self.shell, &url);
+                attach_tab(&self.shell, id);
+            }
+        }
+    }
+}
+
+/// Runs a menu bar item on the window that's in front.
+#[cfg(target_os = "macos")]
+pub fn run_menu_action(action: crate::menubar::MenuAction) {
+    use crate::menubar::MenuAction as Action;
+    let Some(shell) = active_shell() else {
+        return;
+    };
+    let shell = &shell;
+    let (active, tabs) = {
+        let guard = lock(shell);
+        (guard.strip.active_id(), guard.strip.tabs().to_vec())
+    };
+    let page_url = |id: Option<TabId>| {
+        tabs.iter()
+            .find(|tab| Some(tab.id) == id)
+            .map(|tab| tab.page.url.clone())
+            .filter(|url| is_web_url(url))
+    };
+    match action {
+        Action::Shortcut(shortcut) => {
+            perform_shortcut(shell, shortcut);
+        }
+        Action::CloseWindow => close_window(shell),
+        Action::ViewSource => {
+            if let Some(url) = page_url(active) {
+                open_in_new_tab(shell, &format!("view-source:{url}"));
+            }
+        }
+        Action::DuplicateTab => {
+            if let Some(url) = page_url(active) {
+                open_in_new_tab(shell, &url);
+            }
+        }
+        Action::CloseOtherTabs | Action::CloseTabsToTheRight => {
+            let position = tabs.iter().position(|tab| Some(tab.id) == active);
+            let others: Vec<TabId> = tabs
+                .iter()
+                .enumerate()
+                .filter(|(index, tab)| match (&action, position) {
+                    (Action::CloseOtherTabs, _) => Some(tab.id) != active,
+                    (_, Some(at)) => *index > at,
+                    _ => false,
+                })
+                .map(|(_, tab)| tab.id)
+                .collect();
+            for id in others {
+                close_tab(shell, id);
+            }
+        }
+        Action::MuteTab => {
+            if let Some(id) = active {
+                toggle_mute(shell, id);
+            }
+        }
+        Action::BookmarkAllTabs => {
+            for tab in tabs.iter().filter(|tab| is_web_url(&tab.page.url)) {
+                with_storage(|storage| storage.add_bookmark(&tab.page.url, &tab.title, now_ms()));
+            }
+            refresh_bookmark_stars();
+        }
+        Action::SavePage => {
+            if let (Some(url), Some(host)) = (
+                page_url(active),
+                active_browser(shell).and_then(|browser| browser.host()),
+            ) {
+                host.start_download(Some(&CefString::from(url.as_str())));
+            }
+        }
+        Action::OpenFile => {
+            if let Some(host) = active_browser(shell).and_then(|browser| browser.host()) {
+                host.run_file_dialog(
+                    FileDialogMode::OPEN,
+                    Some(&CefString::from("Open file")),
+                    None,
+                    None,
+                    Some(&mut FileChosen::new(shell.clone())),
+                );
+            }
+        }
+        Action::ToggleSplitView => toggle_split_view(shell),
+        Action::ToggleVerticalTabs => {
+            let vertical = settings().vertical_tabs;
+            set_vertical_tabs(!vertical);
+        }
+        Action::Screenshot { full } => take_screenshot(shell, full, false),
+        Action::PickColor => take_screenshot(shell, false, true),
+        Action::InspectText => inspect_text(shell),
+        Action::Library => open_page(shell, InternalPage::Library),
+        Action::Extensions => open_page(shell, InternalPage::Extensions),
+        Action::Workspace(id) => open_workspace(&id),
+        Action::ManageWorkspaces => open_page(shell, InternalPage::Settings),
     }
 }
 

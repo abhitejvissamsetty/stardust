@@ -5,6 +5,8 @@ mod app;
 mod client;
 #[cfg(target_os = "macos")]
 mod mac;
+#[cfg(target_os = "macos")]
+mod menubar;
 mod passwords;
 mod render;
 mod ui;

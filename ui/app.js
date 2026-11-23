@@ -952,7 +952,7 @@ function openAppMenu() {
     { label: "Identify fonts and colours of text", command: { type: "inspectText" } },
     { label: "Screenshot: what's showing", command: { type: "screenshot", full: false } },
     { label: "Screenshot: the whole page", command: { type: "screenshot", full: true } },
-    { label: sidePanelOpen ? "Close the side panel" : "Side panel: notes, to-dos, snippets", shortcut: shortcut("E", { shift: true }), command: { type: "toggleSidePanel" } },
+    { label: sidePanelOpen ? "Close the side panel" : "Side panel: clips and colours", shortcut: shortcut("E", { shift: true }), command: { type: "toggleSidePanel" } },
     { label: splitIds.length ? "Close split view" : "Split view: two pages side by side", command: { type: "toggleSplitView" } },
     { label: tabLayout.vertical ? "Show tabs across the top" : "Show tabs down the side", command: { type: "setVerticalTabs", enabled: !tabLayout.vertical } },
     { kind: "separator" },

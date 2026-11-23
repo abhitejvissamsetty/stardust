@@ -86,6 +86,8 @@ wrap_browser_process_handler! {
     impl BrowserProcessHandler {
         fn on_context_initialized(&self) {
             debug_assert_ne!(currently_on(ThreadId::UI), 0);
+            #[cfg(target_os = "macos")]
+            crate::menubar::install();
 
             let command_line = command_line_get_global().expect("Failed to get command line");
             let url = CefString::from(&command_line.switch_value(Some(&CefString::from("url"))))

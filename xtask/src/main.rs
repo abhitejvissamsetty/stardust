@@ -84,6 +84,9 @@ fn bundle(output: &Path, _release: bool) -> PathBuf {
             "NSCameraUsageDescription",
             "Websites you allow can use the camera.",
         ),
+        // The name in the menu bar and the Dock.
+        ("CFBundleName", "Stardust"),
+        ("CFBundleDisplayName", "Stardust"),
         (
             "NSMicrophoneUsageDescription",
             "Websites you allow can use the microphone.",

@@ -73,9 +73,6 @@
   <body>
     <header>
       <div class="tabs" role="tablist" aria-label="Side panel">
-        <button class="tab" role="tab" data-tab="notes" aria-selected="true">Notes</button>
-        <button class="tab" role="tab" data-tab="todos" aria-selected="false">To-do</button>
-        <button class="tab" role="tab" data-tab="snippets" aria-selected="false">Snippets</button>
         <button class="tab" role="tab" data-tab="clips" aria-selected="false">Clips</button>
         <button class="tab" role="tab" data-tab="colors" aria-selected="false">Colours</button>
       </div>
@@ -83,31 +80,6 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17" /></svg>
       </button>
     </header>
-
-    <section id="notes-section" role="tabpanel">
-      <textarea id="notes" placeholder="Jot down ideas, scripts, links…" aria-label="Notes" spellcheck="true"></textarea>
-      <div class="status" id="notes-status" role="status"></div>
-    </section>
-
-    <section id="todos-section" role="tabpanel" hidden>
-      <form class="row" id="todo-form">
-        <input id="todo-input" type="text" placeholder="Add a to-do" aria-label="Add a to-do" maxlength="300" autocomplete="off" />
-        <button class="primary" type="submit">Add</button>
-      </form>
-      <div class="list" id="todo-list"></div>
-      <div class="row"><span class="status" id="todo-status" style="flex:1"></span><button class="quiet" id="clear-done" type="button">Clear done</button></div>
-    </section>
-
-    <section id="snippets-section" role="tabpanel" hidden>
-      <button class="quiet" id="add-page" type="button">Save this page's link</button>
-      <form id="snippet-form" style="display:flex;flex-direction:column;gap:6px">
-        <input id="snippet-title" type="text" placeholder="Title (optional)" aria-label="Snippet title" maxlength="80" autocomplete="off" />
-        <textarea id="snippet-text" rows="3" placeholder="Text to keep, like a sign-off or a link" aria-label="Snippet text"></textarea>
-        <button class="primary" type="submit" style="align-self:flex-end">Save snippet</button>
-      </form>
-      <div class="list" id="snippet-list"></div>
-      <div class="status" id="snippet-status" role="status"></div>
-    </section>
 
     <section id="clips-section" role="tabpanel" hidden>
       <div class="row">
@@ -148,7 +120,7 @@
         for (const tab of document.querySelectorAll(".tab")) {
           tab.setAttribute("aria-selected", String(tab.dataset.tab === name));
         }
-        for (const id of ["notes", "todos", "snippets", "clips", "colors"]) {
+        for (const id of ["clips", "colors"]) {
           byId(`${id}-section`).hidden = id !== name;
         }
         try { sessionStorage.setItem("tab", name); } catch (_) {}
@@ -165,55 +137,10 @@
         statusTimer = setTimeout(() => (element.textContent = ""), 1800);
       }
 
-      // Notes: saved as you type, a moment after you stop.
-      byId("notes").addEventListener("input", () => {
-        byId("notes-status").textContent = "Saving…";
-        clearTimeout(saveTimer);
-        saveTimer = setTimeout(() => {
-          send({ type: "setNotes", text: byId("notes").value });
-          byId("notes-status").textContent = "Saved";
-        }, 500);
-      });
-
-      // To-dos -------------------------------------------------------------------
-      function renderTodos() {
-        const list = byId("todo-list");
-        if (data.todos.length === 0) {
-          list.replaceChildren(make("div", "empty", "Nothing to do. Add what you need to remember."));
-        } else {
-          list.replaceChildren(...data.todos.map((todo) => {
-            const row = make("div", todo.done ? "item done" : "item");
-            const box = make("input");
-            box.type = "checkbox";
-            box.checked = todo.done;
-            box.setAttribute("aria-label", todo.text);
-            box.addEventListener("change", () => send({ type: "toggleTodo", id: todo.id }));
-            const remove = make("button", "icon", "×");
-            remove.title = "Remove";
-            remove.setAttribute("aria-label", "Remove");
-            remove.addEventListener("click", () => send({ type: "removeTodo", id: todo.id }));
-            row.append(box, make("span", "text", todo.text), remove);
-            return row;
-          }));
-        }
-        const done = data.todos.filter((todo) => todo.done).length;
-        byId("todo-status").textContent = data.todos.length ? `${done} of ${data.todos.length} done` : "";
-        byId("clear-done").hidden = done === 0;
-      }
-      byId("todo-form").addEventListener("submit", (event) => {
-        event.preventDefault();
-        const input = byId("todo-input");
-        if (input.value.trim()) {
-          send({ type: "addTodo", text: input.value });
-          input.value = "";
-        }
-      });
-      byId("clear-done").addEventListener("click", () => send({ type: "clearDoneTodos" }));
-
       // Snippets -----------------------------------------------------------------
       // The text is copied with a hidden field, since a page of this kind can't use the
       // clipboard's own API.
-      function copy(text, statusId = "snippet-status") {
+      function copy(text, statusId = "clip-status") {
         const field = make("textarea");
         field.value = text;
         field.style.position = "fixed";
@@ -225,40 +152,6 @@
         field.remove();
         flash(statusId, copied ? "Copied" : "Couldn't copy");
       }
-      function renderSnippets() {
-        const list = byId("snippet-list");
-        if (data.snippets.length === 0) {
-          list.replaceChildren(make("div", "empty", "No snippets yet. Keep sign-offs, links and replies you use often."));
-          return;
-        }
-        list.replaceChildren(...data.snippets.map((snippet) => {
-          const row = make("div", "item snippet");
-          const head = make("div", "head");
-          const copyButton = make("button", "quiet", "Copy");
-          copyButton.addEventListener("click", () => copy(snippet.text));
-          const remove = make("button", "icon", "×");
-          remove.title = "Remove";
-          remove.setAttribute("aria-label", "Remove");
-          remove.addEventListener("click", () => send({ type: "removeSnippet", id: snippet.id }));
-          head.append(make("span", "title", snippet.title), copyButton, remove);
-          row.append(head, make("div", "body", snippet.text));
-          return row;
-        }));
-      }
-      byId("snippet-form").addEventListener("submit", (event) => {
-        event.preventDefault();
-        const text = byId("snippet-text");
-        if (text.value.trim()) {
-          send({ type: "addSnippet", title: byId("snippet-title").value, text: text.value });
-          byId("snippet-title").value = "";
-          text.value = "";
-        }
-      });
-      byId("add-page").addEventListener("click", () => {
-        send({ type: "addCurrentPageSnippet" });
-        flash("snippet-status", "Saved if this is a web page");
-      });
-
       // Clips -------------------------------------------------------------------
       function host(url) {
         try { return new URL(url).hostname.replace(/^www\./, ""); } catch (_) { return ""; }
@@ -332,24 +225,17 @@
       byId("inspect-text").addEventListener("click", () => send({ type: "inspectText" }));
       byId("copy-colors").addEventListener("click", () => copy(data.colors.join("\n"), "colors-status"));
 
-      // What the browser sends: the notes, to-dos and snippets, for every window to share.
+      // What the browser sends: the clips and colours, for every window to share.
       window.onBrowserEvent = (event) => {
         if (event.type !== "panelData") {
           return;
         }
         data = event.data;
-        const notes = byId("notes");
-        // Don't move the caret under someone typing here.
-        if (document.activeElement !== notes && notes.value !== data.notes) {
-          notes.value = data.notes;
-        }
-        renderTodos();
-        renderSnippets();
         renderClips();
         renderColours();
       };
 
-      try { showTab(sessionStorage.getItem("tab") || "notes"); } catch (_) { showTab("notes"); }
+      try { showTab(["clips", "colors"].includes(sessionStorage.getItem("tab")) ? sessionStorage.getItem("tab") : "clips"); } catch (_) { showTab("clips"); }
       send({ type: "sidePanelReady" });
     </script>
   </body>

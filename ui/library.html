@@ -73,7 +73,7 @@
         return element;
       };
 
-      const KINDS = [["", "Everything"], ["screenshot", "Screenshots"], ["clip", "Clips"], ["snippet", "Snippets"], ["color", "Colours"]];
+      const KINDS = [["", "Everything"], ["screenshot", "Screenshots"], ["clip", "Clips"], ["color", "Colours"]];
       const LABEL = { screenshot: "Screenshot", clip: "Clip", snippet: "Snippet", color: "Colour" };
       let kind = "";
       let tag = "";
@@ -253,7 +253,7 @@
         const empty = byId("empty");
         empty.hidden = latest.items.length > 0;
         empty.textContent = latest.total === 0
-          ? "Nothing here yet. Clips, snippets and colours from the side panel appear here, and so do screenshots you save to the library."
+          ? "Nothing here yet. Clips and colours from the side panel appear here, and so do screenshots you save to the library."
           : "Nothing matches. Try fewer words, or clear the filters.";
       }
 
