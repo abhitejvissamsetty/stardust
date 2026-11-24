@@ -288,6 +288,30 @@ pub fn install_folder(executable: &Path) -> Option<PathBuf> {
     }
 }
 
+/// The folder in an unpacked package that replaces the install folder. On macOS it's the
+/// `.app` bundle, which has a fixed name. Elsewhere people install into a folder of any
+/// name, so it's the package's one top-level folder, whatever it's called.
+fn package_folder(payload: &Path, install_name: &std::ffi::OsStr) -> Result<PathBuf> {
+    if cfg!(target_os = "macos") {
+        let new = payload.join(install_name);
+        return if new.exists() {
+            Ok(new)
+        } else {
+            Err(Error::BadPackage(format!(
+                "the package has no {}",
+                install_name.to_string_lossy()
+            )))
+        };
+    }
+    let mut items = fs::read_dir(payload)?.collect::<std::io::Result<Vec<_>>>()?;
+    match (items.pop(), items.is_empty()) {
+        (Some(only), true) if only.file_type()?.is_dir() => Ok(only.path()),
+        _ => Err(Error::BadPackage(
+            "the package should hold one folder".into(),
+        )),
+    }
+}
+
 /// Swaps a staged version in for the installed one. Returns the new install folder's
 /// executable, to restart into, or nothing if there was nothing to install.
 ///
@@ -303,14 +327,7 @@ pub fn install_staged(executable: &Path, staging: &Path, current: &str) -> Resul
     let name = install
         .file_name()
         .ok_or_else(|| Error::BadPackage("no install folder".into()))?;
-    // The package holds one top-level item named like the install folder.
-    let new = payload.join(name);
-    if !new.exists() {
-        return Err(Error::BadPackage(format!(
-            "the package has no {}",
-            name.to_string_lossy()
-        )));
-    }
+    let new = package_folder(&payload, name)?;
     let old = install.with_file_name(format!("{}.old", name.to_string_lossy()));
     if old.exists() {
         fs::remove_dir_all(&old)?;
@@ -481,6 +498,50 @@ mod tests {
         assert_eq!(fs::read(&restarted).unwrap(), b"new");
         assert_eq!(fs::read(root.join("dist.old/stardust")).unwrap(), b"old");
         assert!(!staging.exists());
+    }
+
+    #[test]
+    fn installs_into_a_folder_of_any_name() {
+        if cfg!(target_os = "macos") {
+            return;
+        }
+        let root = temp("any-name");
+        let install = root.join("my browser");
+        fs::create_dir_all(&install).unwrap();
+        fs::write(install.join("stardust"), b"old").unwrap();
+        let package = package(&[("dist/stardust", b"new")]);
+        let staging = root.join("staging");
+        stage(&release_for(&package, "0.2.0"), &package, &staging).unwrap();
+
+        let restarted = install_staged(&install.join("stardust"), &staging, "0.1.0")
+            .unwrap()
+            .unwrap();
+        assert_eq!(restarted, install.join("stardust"));
+        assert_eq!(fs::read(&restarted).unwrap(), b"new");
+        assert_eq!(
+            fs::read(root.join("my browser.old/stardust")).unwrap(),
+            b"old"
+        );
+    }
+
+    #[test]
+    fn refuses_a_package_with_more_than_one_folder() {
+        if cfg!(target_os = "macos") {
+            return;
+        }
+        let root = temp("two-folders");
+        let install = root.join("stardust");
+        fs::create_dir_all(&install).unwrap();
+        fs::write(install.join("stardust"), b"old").unwrap();
+        let package = package(&[("dist/stardust", b"new"), ("other/file", b"x")]);
+        let staging = root.join("staging");
+        stage(&release_for(&package, "0.2.0"), &package, &staging).unwrap();
+
+        assert!(matches!(
+            install_staged(&install.join("stardust"), &staging, "0.1.0"),
+            Err(Error::BadPackage(_))
+        ));
+        assert_eq!(fs::read(install.join("stardust")).unwrap(), b"old");
     }
 
     #[test]

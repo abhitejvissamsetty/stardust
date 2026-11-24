@@ -194,6 +194,7 @@ pub struct Shell {
 
 const EXTENSION_POPUP_WIDTH: i32 = 380;
 const EXTENSION_POPUP_HEIGHT: i32 = 520;
+const POPUP_FOCUS_DELAY_MS: i64 = 150;
 
 const CLOSED_TAB_LIMIT: usize = 20;
 const FAVICON_LIMIT_BYTES: usize = 48 * 1024;
@@ -1256,11 +1257,12 @@ fn focus_active_tab(shell: &SharedShell) {
     }
 }
 
-/// The window became active, perhaps after a page's dialog closed. That leaves keyboard
-/// focus nowhere until something takes it, so shortcuts would stop working.
-/// The window that was last in front, which the menu bar's commands act on.
+/// The window that was last in front, which the menu bar's commands act on. Only
+/// macOS has a menu bar.
+#[cfg(target_os = "macos")]
 static ACTIVE_WINDOW: Mutex<Option<SharedShell>> = Mutex::new(None);
 
+#[cfg(target_os = "macos")]
 fn active_shell() -> Option<SharedShell> {
     let remembered = ACTIVE_WINDOW
         .lock()
@@ -1295,12 +1297,16 @@ fn refresh_menu_profiles(shell: &SharedShell) {
     crate::menubar::set_profiles(profiles);
 }
 
+/// The window became active, perhaps after a page's dialog closed. That leaves keyboard
+/// focus nowhere until something takes it, so shortcuts would stop working.
 pub fn window_activated(shell: &SharedShell) {
-    *ACTIVE_WINDOW
-        .lock()
-        .expect("Failed to lock the active window") = Some(shell.clone());
     #[cfg(target_os = "macos")]
-    refresh_menu_profiles(shell);
+    {
+        *ACTIVE_WINDOW
+            .lock()
+            .expect("Failed to lock the active window") = Some(shell.clone());
+        refresh_menu_profiles(shell);
+    }
     let toolbar = lock(shell).toolbar.clone();
     if let Some(toolbar) = toolbar {
         focus_toolbar(&toolbar);
@@ -3008,18 +3014,21 @@ fn run_shortcut(shell: &SharedShell, event: &KeyEvent) -> bool {
     if event.type_ != KeyEventType::RAWKEYDOWN {
         return false;
     }
-    let key = KeyPress {
+    let Some(shortcut) = shortcut_for(key_press(event), cfg!(target_os = "macos")) else {
+        return false;
+    };
+
+    perform_shortcut(shell, shortcut)
+}
+
+fn key_press(event: &KeyEvent) -> KeyPress {
+    KeyPress {
         key_code: event.windows_key_code,
         ctrl: event.modifiers & EVENTFLAG_CONTROL_DOWN != 0,
         shift: event.modifiers & EVENTFLAG_SHIFT_DOWN != 0,
         alt: event.modifiers & EVENTFLAG_ALT_DOWN != 0,
         command: event.modifiers & EVENTFLAG_COMMAND_DOWN != 0,
-    };
-    let Some(shortcut) = shortcut_for(key, cfg!(target_os = "macos")) else {
-        return false;
-    };
-
-    perform_shortcut(shell, shortcut)
+    }
 }
 
 /// Runs a shortcut's command. False if it wasn't used, so the key goes to the page.
@@ -5816,6 +5825,8 @@ fn show_dev_tools(shell: &SharedShell) {
         if host.has_dev_tools() != 0 {
             host.close_dev_tools();
         } else {
+            // Chrome style would give developer tools Chromium's own shortcuts, so Ctrl+Shift+N
+            // there would open Chromium's incognito window, outside Stardust.
             let info = WindowInfo {
                 bounds: Rect {
                     x: 90,
@@ -5823,9 +5834,24 @@ fn show_dev_tools(shell: &SharedShell) {
                     width: 1180,
                     height: 780,
                 },
+                runtime_style: RuntimeStyle::ALLOY,
                 ..Default::default()
             };
-            host.show_dev_tools(Some(&info), None, None, None);
+            let mut client = DevToolsClient::new(shell.clone());
+            host.show_dev_tools(Some(&info), Some(&mut client), None, None);
+        }
+    }
+}
+
+// Developer tools gets Stardust's shortcuts, such as Ctrl+Q, like any other window.
+wrap_client! {
+    struct DevToolsClient {
+        shell: SharedShell,
+    }
+
+    impl Client {
+        fn keyboard_handler(&self) -> Option<KeyboardHandler> {
+            Some(Shortcuts::new(self.shell.clone()))
         }
     }
 }
@@ -6065,7 +6091,7 @@ fn open_extension_popup(shell: &SharedShell, id: &str, left: i32, top: i32) {
         return;
     };
     let Some(overlay) =
-        window.add_overlay_view(Some(&mut View::from(&view)), DockingMode::CUSTOM, 0)
+        window.add_overlay_view(Some(&mut View::from(&view)), DockingMode::CUSTOM, 1)
     else {
         release_extension_popup(shell);
         return;
@@ -6104,6 +6130,29 @@ fn hide_extension_popup(shell: &SharedShell) {
         }
         // It hasn't finished starting, so there's nothing to close yet. Let go of it.
         None => release_extension_popup(shell),
+    }
+    // Otherwise keyboard focus stays with the closed popup, and shortcuts stop working.
+    focus_active_tab(shell);
+}
+
+wrap_task! {
+    struct FocusExtensionPopup {
+        shell: SharedShell,
+    }
+
+    impl Task {
+        fn execute(&self) {
+            let (view, browser) = {
+                let shell = lock(&self.shell);
+                (shell.ext_popup_view.clone(), shell.ext_popup_browser.clone())
+            };
+            if let Some(view) = view {
+                view.request_focus();
+            }
+            if let Some(host) = browser.and_then(|browser| browser.host()) {
+                host.set_focus(1);
+            }
+        }
     }
 }
 
@@ -6164,16 +6213,24 @@ wrap_keyboard_handler! {
     }
 }
 
-/// Escape puts the popup away. Every other key stays with the popup's page.
+/// Escape puts the popup away. Stardust's own shortcuts, such as Quit, put it away and
+/// then run. Every other key stays with the popup's page.
 fn popup_escape(shell: &SharedShell, event: Option<&KeyEvent>) -> i32 {
     const ESCAPE: i32 = 0x1B;
-    let is_escape = event.is_some_and(|event| {
-        event.type_ == KeyEventType::RAWKEYDOWN && event.windows_key_code == ESCAPE
-    });
-    if is_escape {
+    let Some(event) = event.filter(|event| event.type_ == KeyEventType::RAWKEYDOWN) else {
+        return 0;
+    };
+    if event.windows_key_code == ESCAPE {
         hide_extension_popup(shell);
+        return 1;
     }
-    is_escape.into()
+    match shortcut_for(key_press(event), cfg!(target_os = "macos")) {
+        Some(shortcut) => {
+            hide_extension_popup(shell);
+            perform_shortcut(shell, shortcut).into()
+        }
+        None => 0,
+    }
 }
 
 wrap_request_handler! {
@@ -6236,6 +6293,12 @@ wrap_life_span_handler! {
                 }
                 wanted
             };
+            // Keys go to the popup, which can have its own text fields. Asking while it
+            // starts does nothing, so ask once it has had a moment to appear.
+            if wanted {
+                let mut task = FocusExtensionPopup::new(self.shell.clone());
+                post_delayed_task(ThreadId::UI, Some(&mut task), POPUP_FOCUS_DELAY_MS);
+            }
             // The person may have put the popup away before it finished starting. Closing
             // is done without holding the lock, because it calls back into this code.
             if !wanted && let Some(host) = browser.as_deref().and_then(|browser| browser.host()) {
