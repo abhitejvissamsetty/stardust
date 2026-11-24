@@ -272,6 +272,23 @@ fn finish_open_window(shell: SharedShell, session: Option<Session>, requested_ur
     )));
 }
 
+/// Stardust's icon, at the sizes window lists and docks ask for. Without it, CEF shows
+/// Chromium's. macOS takes the icon from the app bundle instead.
+fn set_app_icon(window: &Window) {
+    if cfg!(target_os = "macos") {
+        return;
+    }
+    const ICON_1X: &[u8] = include_bytes!("../../../assets/icon/stardust-128.png");
+    const ICON_2X: &[u8] = include_bytes!("../../../assets/icon/stardust-256.png");
+    let Some(mut icon) = image_create() else {
+        return;
+    };
+    icon.add_png(1.0, Some(ICON_1X));
+    icon.add_png(2.0, Some(ICON_2X));
+    window.set_window_icon(Some(&mut icon));
+    window.set_window_app_icon(Some(&mut icon));
+}
+
 wrap_browser_view_delegate! {
     struct ToolbarViewHost {
         shell: SharedShell,
@@ -355,6 +372,7 @@ wrap_window_delegate! {
             let (Some(window), Some(toolbar)) = (window, toolbar.as_ref()) else {
                 return;
             };
+            set_app_icon(window);
 
             let settings = BoxLayoutSettings {
                 cross_axis_alignment: AxisAlignment::STRETCH,
@@ -421,6 +439,22 @@ wrap_window_delegate! {
             if active != 0 {
                 window_activated(&self.shell);
             }
+        }
+
+        // Tells docks and window lists which app a window belongs to. Without it, Linux
+        // desktops show no name for it or group it with Chromium.
+        fn linux_window_properties(
+            &self,
+            _window: Option<&mut Window>,
+            properties: Option<&mut LinuxWindowProperties>,
+        ) -> i32 {
+            let Some(properties) = properties else {
+                return 0;
+            };
+            properties.wm_class_class = CefString::from("Stardust");
+            properties.wm_class_name = CefString::from("stardust");
+            properties.wayland_app_id = CefString::from("stardust");
+            1
         }
 
         fn window_runtime_style(&self) -> RuntimeStyle {
