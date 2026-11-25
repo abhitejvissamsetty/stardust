@@ -41,6 +41,8 @@ cargo xtask bundle --release
 cargo xtask release --key ~/.stardust-keys/release.key --out releases
 ```
 
+Releases are now made in two steps, `cargo xtask package` and `cargo xtask sign`. See [releasing.md](releasing.md).
+
 `keygen` writes the private key outside the repository, readable only by you, and puts the public key in `crates/update/release-key.pub`. Anyone with the private key can ship updates to every Stardust, so keep it safe. Run `release` on each platform with the same `--out` folder, and it adds that platform's package to the same signed manifest. Then upload the folder to the server.
 
 The public key in the repository now is a **test key**, kept at `~/.stardust-keys/test-release.key` on the machine that made it. Make the real key before the first release, and commit its public half.

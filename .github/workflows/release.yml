@@ -1,0 +1,73 @@
+name: Release
+
+# Pushing a tag like v0.2.0 builds Stardust for every platform and attaches the
+# packages to a draft GitHub release. Nothing is signed here: the signing key stays on
+# the maintainer's computer, and scripts/sign-release.sh signs and publishes the draft.
+# See docs/releasing.md.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      # Where installs look for updates. Empty, and so off, until a server the browser
+      # can reach without signing in is set as the repository variable.
+      STARDUST_UPDATE_URL: ${{ vars.STARDUST_UPDATE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Free disk space
+        if: runner.os == 'Linux'
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+      - name: Install Linux build tools
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -q && sudo apt-get install -yq ninja-build libglib2.0-dev libdbus-1-dev pkg-config
+      - name: Install Windows build tools
+        if: runner.os == 'Windows'
+        run: choco install ninja -y
+      - name: Install macOS build tools
+        if: runner.os == 'macOS'
+        run: brew install ninja
+      - name: Check the tag matches the version
+        shell: bash
+        run: |
+          version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "Tag $GITHUB_REF_NAME doesn't match version $version in Cargo.toml"
+            exit 1
+          fi
+      - run: cargo xtask bundle --release
+      - run: cargo xtask package --out release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ runner.os }}
+          path: release
+          if-no-files-found: error
+          retention-days: 7
+
+  draft:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la release
+          gh release create "$GITHUB_REF_NAME" release/* \
+            --repo "$GITHUB_REPOSITORY" --draft --title "Stardust ${GITHUB_REF_NAME#v}" \
+            --notes "Draft: sign it with scripts/sign-release.sh $GITHUB_REF_NAME"

@@ -4,9 +4,11 @@
 //!   to it, in `dist/`.
 //! - `cargo xtask keygen <private key file>` makes a release signing key, and puts its
 //!   public half in `crates/update/release-key.pub`.
-//! - `cargo xtask release --key <private key file> --out <folder>` packages `dist/` for
-//!   this platform and writes a signed `manifest.json` into the folder, keeping other
-//!   platforms' entries for the same version.
+//! - `cargo xtask package --out <folder>` packages `dist/` for this platform, with a
+//!   `.package.json` describing it. It needs no key, so build servers run it.
+//! - `cargo xtask sign --key <private key file> --dir <folder> [--rollout <percent>]`
+//!   gathers the folder's `.package.json` files into `manifest.json` and signs it. See
+//!   `docs/releasing.md`.
 
 use std::path::{Path, PathBuf};
 
@@ -33,17 +35,27 @@ fn main() {
             Some(path) => release::keygen(Path::new(path)),
             None => usage(),
         },
-        Some("release") => match (value("--key"), value("--out")) {
-            (Some(key), Some(out)) => release::release(&key, &out),
-            _ => usage(),
+        Some("package") => match value("--out") {
+            Some(out) => release::package_release(&out),
+            None => usage(),
         },
+        Some("sign") => {
+            let rollout = match value("--rollout") {
+                Some(text) => text.to_string_lossy().parse().unwrap_or(0),
+                None => 100,
+            };
+            match (value("--key"), value("--dir")) {
+                (Some(key), Some(dir)) => release::sign(&key, &dir, rollout),
+                _ => usage(),
+            }
+        }
         _ => usage(),
     }
 }
 
 fn usage() {
     eprintln!(
-        "usage:\n  cargo xtask bundle [--release]\n  cargo xtask keygen <private key file>\n  cargo xtask release --key <private key file> --out <folder>"
+        "usage:\n  cargo xtask bundle [--release]\n  cargo xtask keygen <private key file>\n  cargo xtask package --out <folder>\n  cargo xtask sign --key <private key file> --dir <folder> [--rollout <percent>]"
     );
     std::process::exit(2);
 }

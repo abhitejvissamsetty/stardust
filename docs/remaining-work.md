@@ -55,6 +55,8 @@ In `crates/bridge/src/discard.rs` and `crates/cef-host/src/client.rs`:
 
 ## 4. Milestone 4: updates reaching people
 
+**Updated 2026-11-25:** the real signing key exists, releases build in CI and roll out step by step. How to release, and what's left: [releasing.md](releasing.md).
+
 The updater works end to end on macOS (see [milestone-4.md](milestone-4.md#updates)). Left:
 
 1. Make the real signing key, replace `crates/update/release-key.pub`, and commit. The current key is a test key whose private half is in `~/.stardust-keys/test-release.key` on the Mac that made it.
