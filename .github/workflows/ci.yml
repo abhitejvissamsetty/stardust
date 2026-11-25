@@ -11,8 +11,15 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      # Two CEF builds fill the Linux runner's disk. Debug info is the
+      # biggest part of the debug build and isn't needed here.
+      CARGO_PROFILE_DEV_DEBUG: "0"
     steps:
       - uses: actions/checkout@v4
+      - name: Free disk space
+        if: runner.os == 'Linux'
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL && df -h /
       - name: Install Linux build tools
         if: runner.os == 'Linux'
         run: sudo apt-get update -q && sudo apt-get install -yq ninja-build libglib2.0-dev libdbus-1-dev pkg-config

@@ -63,9 +63,23 @@ fn bundle(output: &Path, release: bool) -> PathBuf {
     path
 }
 
+// cef-rs's `build_bundle` builds a package named after the app, but Stardust's
+// is `shell`, so this builds it and then uses cef-rs only to lay out the files.
 #[cfg(target_os = "windows")]
 fn bundle(output: &Path, release: bool) -> PathBuf {
-    cef::build_util::win::build_bundle(output, APP, release).expect("failed to bundle")
+    let mut args = vec!["build", "-p", "shell", "--lib"];
+    if release {
+        args.push("--release");
+    }
+    let status = std::process::Command::new(env!("CARGO"))
+        .args(&args)
+        .status()
+        .expect("failed to run cargo");
+    assert!(status.success(), "failed to build Stardust");
+    let target = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../target")
+        .join(if release { "release" } else { "debug" });
+    cef::build_util::win::bundle(output, &target, APP).expect("failed to bundle")
 }
 
 // The macOS bundler in cef-rs only builds debug binaries.
