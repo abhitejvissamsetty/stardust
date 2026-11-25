@@ -45,5 +45,9 @@ jobs:
       - name: Check performance budgets
         if: runner.os == 'Linux'
         run: |
+          # Ubuntu 24.04 stops unconfined programs from creating user
+          # namespaces, which Chromium's sandbox needs. Chrome's own package
+          # installs an AppArmor profile for this; Stardust's doesn't yet.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           sudo apt-get install -yq xvfb libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 libasound2t64 libpango-1.0-0
           xvfb-run -a cargo run --release -p perf -- dist
