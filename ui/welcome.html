@@ -107,10 +107,15 @@
       /* Intro */
       .intro { text-align: center; }
       .intro .sub { margin-left: auto; margin-right: auto; }
-      .orb { display: block; height: min(280px, 30vh); margin: 0 auto 2.4vh; overflow: visible; width: min(280px, 30vh); }
-      .orb .ribbon { animation: drift 18s ease-in-out infinite alternate; transform-origin: 150px 150px; }
-      .orb .spark { animation: breathe 5s ease-in-out infinite; transform-origin: 150px 150px; }
-      .orb .rider { animation: orbit 14s linear infinite; transform-origin: 150px 150px; }
+      /* Each moving part is its own SVG, turned as a whole. Animating part of one SVG
+         makes Chromium redraw all of it, blurs included, on every frame. */
+      .orb { display: block; height: min(280px, 30vh); margin: 0 auto 2.4vh; position: relative; width: min(280px, 30vh); }
+      .orb svg { height: 100%; inset: 0; overflow: visible; position: absolute; width: 100%; }
+      .orb .ribbon, .orb .spark, .orb .rider { transform-origin: 50% 50%; will-change: transform; }
+      .orb .ribbon { animation: drift 18s ease-in-out infinite alternate; }
+      .orb .spark { animation: breathe 5s ease-in-out infinite; }
+      .orb .rider { animation: orbit 14s linear infinite; }
+      .step:not(.shown) .orb *, .resting .orb * { animation-play-state: paused; }
       @keyframes drift { from { transform: rotate(-24deg); } to { transform: rotate(-14deg); } }
       @keyframes breathe { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(0.9); opacity: 0.82; } }
       @keyframes orbit { to { transform: rotate(360deg); } }
@@ -244,52 +249,56 @@
       <main class="stage">
         <!-- 0 · Intro -->
         <section class="step intro" data-step="intro" aria-labelledby="t-intro">
-          <svg class="orb" viewBox="0 0 300 300" aria-hidden="true">
-            <defs>
-              <radialGradient id="glass" cx="50%" cy="50%" r="50%">
-                <stop offset="0.72" stop-color="#000" stop-opacity="0" />
-                <stop offset="0.93" stop-color="#ffffff" stop-opacity="0.08" />
-                <stop offset="1" stop-color="#ffffff" stop-opacity="0.32" />
-              </radialGradient>
-              <linearGradient id="rim" x1="0" y1="0" x2="1" y2="1">
-                <stop offset="0" stop-color="#fff" stop-opacity="0.9" />
-                <stop offset="0.45" stop-color="#fff" stop-opacity="0.08" />
-                <stop offset="1" stop-color="#fff" stop-opacity="0.55" />
-              </linearGradient>
-              <linearGradient id="band" x1="0" y1="0" x2="1" y2="0">
-                <stop offset="0" stop-color="#fff" stop-opacity="0.15" />
-                <stop offset="0.35" stop-color="#e9ecf5" stop-opacity="0.95" />
-                <stop offset="0.65" stop-color="#9aa0b0" stop-opacity="0.6" />
-                <stop offset="1" stop-color="#fff" stop-opacity="0.9" />
-              </linearGradient>
-              <radialGradient id="core" cx="50%" cy="50%" r="50%">
-                <stop offset="0" stop-color="#fff" stop-opacity="0.95" />
-                <stop offset="0.25" stop-color="#dfe6ff" stop-opacity="0.35" />
-                <stop offset="1" stop-color="#fff" stop-opacity="0" />
-              </radialGradient>
-              <filter id="soft" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="2.2" /></filter>
-              <filter id="bloom" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="10" /></filter>
-              <clipPath id="front"><rect x="0" y="150" width="300" height="150" /></clipPath>
-            </defs>
-            <circle cx="150" cy="150" r="128" fill="url(#glass)" />
-            <circle cx="150" cy="150" r="127.5" fill="none" stroke="url(#rim)" stroke-width="1.2" />
-            <circle cx="150" cy="150" r="128" fill="none" stroke="#fff" stroke-opacity="0.18" stroke-width="6" filter="url(#soft)" />
-            <path d="M58 92 A128 128 0 0 1 150 22" fill="none" stroke="#fff" stroke-opacity="0.35" stroke-width="1" filter="url(#soft)" />
-            <g class="ribbon">
+          <div class="orb" aria-hidden="true">
+            <svg viewBox="0 0 300 300">
+              <defs>
+                <radialGradient id="glass" cx="50%" cy="50%" r="50%">
+                  <stop offset="0.72" stop-color="#000" stop-opacity="0" />
+                  <stop offset="0.93" stop-color="#ffffff" stop-opacity="0.08" />
+                  <stop offset="1" stop-color="#ffffff" stop-opacity="0.32" />
+                </radialGradient>
+                <linearGradient id="rim" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0" stop-color="#fff" stop-opacity="0.9" />
+                  <stop offset="0.45" stop-color="#fff" stop-opacity="0.08" />
+                  <stop offset="1" stop-color="#fff" stop-opacity="0.55" />
+                </linearGradient>
+                <linearGradient id="band" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0" stop-color="#fff" stop-opacity="0.15" />
+                  <stop offset="0.35" stop-color="#e9ecf5" stop-opacity="0.95" />
+                  <stop offset="0.65" stop-color="#9aa0b0" stop-opacity="0.6" />
+                  <stop offset="1" stop-color="#fff" stop-opacity="0.9" />
+                </linearGradient>
+                <radialGradient id="core" cx="50%" cy="50%" r="50%">
+                  <stop offset="0" stop-color="#fff" stop-opacity="0.95" />
+                  <stop offset="0.25" stop-color="#dfe6ff" stop-opacity="0.35" />
+                  <stop offset="1" stop-color="#fff" stop-opacity="0" />
+                </radialGradient>
+                <filter id="soft" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="2.2" /></filter>
+                <filter id="bloom" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="10" /></filter>
+                <clipPath id="front"><rect x="0" y="150" width="300" height="150" /></clipPath>
+              </defs>
+              <circle cx="150" cy="150" r="128" fill="url(#glass)" />
+              <circle cx="150" cy="150" r="127.5" fill="none" stroke="url(#rim)" stroke-width="1.2" />
+              <circle cx="150" cy="150" r="128" fill="none" stroke="#fff" stroke-opacity="0.18" stroke-width="6" filter="url(#soft)" />
+              <path d="M58 92 A128 128 0 0 1 150 22" fill="none" stroke="#fff" stroke-opacity="0.35" stroke-width="1" filter="url(#soft)" />
+            </svg>
+            <svg class="ribbon" viewBox="0 0 300 300">
               <!-- back half of the ribbon, behind the star -->
               <ellipse cx="150" cy="150" rx="118" ry="44" fill="none" stroke="url(#band)" stroke-width="9" stroke-opacity="0.35" />
-            </g>
-            <g class="spark">
+            </svg>
+            <svg class="spark" viewBox="0 0 300 300">
               <circle cx="150" cy="150" r="70" fill="url(#core)" filter="url(#bloom)" />
               <path d="M150 50 C153 120 160 147 222 150 C160 153 153 180 150 250 C147 180 140 153 78 150 C140 147 147 120 150 50Z" fill="#fff" />
               <circle cx="150" cy="150" r="5" fill="#fff" filter="url(#soft)" />
-            </g>
-            <g class="ribbon" clip-path="url(#front)">
-              <ellipse cx="150" cy="150" rx="118" ry="44" fill="none" stroke="url(#band)" stroke-width="9" />
-              <ellipse cx="150" cy="150" rx="118" ry="44" fill="none" stroke="#fff" stroke-opacity="0.8" stroke-width="1" transform="translate(0 -3.5)" />
-            </g>
-            <g class="rider"><circle cx="150" cy="14" r="1.6" fill="#fff" /><circle cx="150" cy="14" r="5" fill="#fff" opacity="0.25" filter="url(#soft)" /></g>
-          </svg>
+            </svg>
+            <svg class="ribbon" viewBox="0 0 300 300">
+              <g clip-path="url(#front)">
+                <ellipse cx="150" cy="150" rx="118" ry="44" fill="none" stroke="url(#band)" stroke-width="9" />
+                <ellipse cx="150" cy="150" rx="118" ry="44" fill="none" stroke="#fff" stroke-opacity="0.8" stroke-width="1" transform="translate(0 -3.5)" />
+              </g>
+            </svg>
+            <svg class="rider" viewBox="0 0 300 300"><circle cx="150" cy="14" r="1.6" fill="#fff" /><circle cx="150" cy="14" r="5" fill="#fff" opacity="0.25" filter="url(#soft)" /></svg>
+          </div>
           <h1 class="wordmark" id="t-intro"><span>Welcome to</span>Stardust</h1>
           <p class="sub">A browser for people who <em>make</em> things. Let's set it up. It takes about a minute, and you can change all of it later.</p>
           <div class="actions">
@@ -382,6 +391,28 @@
       const ctx = sky.getContext("2d");
       let stars = [], width = 0, height = 0, pointerX = 0, pointerY = 0, lean = { x: 0, y: 0 };
       let meteor = null, nextMeteor = performance.now() + 6000;
+      // Twinkling is slow, so 24 frames a second looks the same as 60 at well under
+      // half the cost, which matters most without a graphics card.
+      const FRAME_MS = 1000 / 24;
+      let lastFrame = -FRAME_MS;
+      // Seconds the sky has moved for, which stands still while it rests, so the
+      // stars don't jump when it wakes.
+      let skyTime = 0;
+      // Anything moving costs CPU on every frame, a third of a core even without a
+      // graphics card, so the sky and the orb rest after a while without input and
+      // wake on the next.
+      const REST_MS = 10000;
+      let lastInput = performance.now(), resting = false;
+      function wake() {
+        lastInput = performance.now();
+        if (!resting) return;
+        resting = false;
+        document.documentElement.classList.remove("resting");
+        requestAnimationFrame(draw);
+      }
+      for (const type of ["pointermove", "pointerdown", "keydown", "wheel", "focus"]) {
+        addEventListener(type, wake, { passive: true });
+      }
       function seed() {
         const ratio = Math.min(devicePixelRatio || 1, 2);
         width = innerWidth; height = innerHeight;
@@ -401,9 +432,19 @@
         });
       }
       function draw(now) {
+        // A shooting star finishes before the sky rests.
+        if (!calm && !meteor && now - lastInput > REST_MS) {
+          resting = true;
+          document.documentElement.classList.add("resting");
+          return;
+        }
+        if (!calm && now - lastFrame < FRAME_MS) { requestAnimationFrame(draw); return; }
+        skyTime += Math.min(now - lastFrame, 100) / 1000;
+        lastFrame = now;
         ctx.clearRect(0, 0, width, height);
-        lean.x += (pointerX - lean.x) * 0.04; lean.y += (pointerY - lean.y) * 0.04;
-        const t = now / 1000;
+        // The same easing per second as 0.04 a frame at 60 frames a second.
+        lean.x += (pointerX - lean.x) * 0.1; lean.y += (pointerY - lean.y) * 0.1;
+        const t = skyTime;
         for (const s of stars) {
           const twinkle = calm ? 1 : 0.65 + 0.35 * Math.sin(t * s.speed + s.phase);
           const a = s.base * twinkle;
