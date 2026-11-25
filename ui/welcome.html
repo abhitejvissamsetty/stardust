@@ -3,22 +3,29 @@
   <head>
     <meta charset="utf-8" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
-    <meta name="color-scheme" content="dark" />
+    <meta name="color-scheme" content="light" />
     <title>Welcome to Stardust</title>
     <style>
       /*TOKENS*/
-      /* The welcome page is always night: it takes its look from the icon, a glass orb with
-         a silver ribbon and a star at its heart. */
+      /* The welcome page is always bright: white, with the workspace palette as soft light
+         at its edges and in the orb, the icon's glass sphere with a ribbon and a star. */
       :root {
-        color-scheme: dark;
-        --void: #030305;
-        --ink: #f4f4f6;
-        --ink-2: rgb(236 238 245 / 62%);
-        --ink-3: rgb(236 238 245 / 38%);
-        --hair: rgb(255 255 255 / 9%);
-        --hair-2: rgb(255 255 255 / 16%);
-        --glass: rgb(255 255 255 / 3.5%);
-        --glass-2: rgb(255 255 255 / 7%);
+        color-scheme: light;
+        --paper: #ffffff;
+        --ink: #15161a;
+        --ink-2: #555966;
+        --ink-3: #8b8f9b;
+        --hair: #ebecf0;
+        --hair-2: #d9dbe1;
+        --wash: #f6f7f9;
+        --wash-2: #eef0f4;
+        --blue: #2f6fed;
+        --violet: #8b5cf6;
+        --pink: #d6479a;
+        --teal: #14a3a3;
+        --amber: #d98e1f;
+        --good: #12663a;
+        --bad: #c5362c;
         --serif: ui-serif, "New York", "Iowan Old Style", Georgia, serif;
         --sans: -apple-system, "SF Pro Display", system-ui, "Segoe UI Variable Display", "Segoe UI", "Noto Sans", sans-serif;
         --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
@@ -27,7 +34,12 @@
       * { box-sizing: border-box; }
       html, body { height: 100%; margin: 0; }
       body {
-        background: radial-gradient(120% 80% at 50% 115%, #0d0f16 0%, var(--void) 60%) fixed, var(--void);
+        background:
+          radial-gradient(55% 45% at 8% 4%, rgb(47 111 237 / 11%), transparent 70%),
+          radial-gradient(45% 40% at 96% 10%, rgb(214 71 154 / 9%), transparent 70%),
+          radial-gradient(50% 45% at 90% 98%, rgb(20 163 163 / 9%), transparent 70%),
+          radial-gradient(45% 40% at 4% 96%, rgb(217 142 31 / 8%), transparent 70%),
+          var(--paper);
         color: var(--ink);
         font: 15px/1.55 var(--sans);
         -webkit-font-smoothing: antialiased;
@@ -37,43 +49,40 @@
       button, input { font: inherit; color: inherit; }
       button { cursor: default; }
       [hidden] { display: none !important; }
-      ::selection { background: rgb(255 255 255 / 22%); }
+      ::selection { background: rgb(47 111 237 / 18%); }
 
-      /* Sky */
+      /* Stardust */
       #sky { inset: 0; position: fixed; z-index: 0; }
       .haze {
-        background:
-          radial-gradient(40% 32% at 50% 38%, rgb(190 205 255 / 7%), transparent 70%),
-          radial-gradient(30% 24% at 18% 82%, rgb(255 255 255 / 2.5%), transparent 70%);
+        background: radial-gradient(34% 30% at 50% 36%, rgb(139 92 246 / 9%), transparent 70%);
         inset: 0; pointer-events: none; position: fixed; z-index: 0;
       }
-      .grain { height: 100%; inset: 0; mix-blend-mode: overlay; opacity: 0.55; pointer-events: none; position: fixed; width: 100%; z-index: 1; }
 
       /* Frame */
       .frame { display: grid; grid-template-rows: auto 1fr auto; height: 100%; position: relative; z-index: 2; }
       header, footer { align-items: center; display: flex; justify-content: space-between; padding: 26px 34px; position: relative; }
       header .constellation { left: 50%; position: absolute; transform: translateX(-50%); }
-      .mark { align-items: center; color: var(--ink-2); display: flex; font-size: 13px; gap: 10px; letter-spacing: 0.02em; }
-      .mark svg { height: 14px; width: 14px; }
+      .mark { align-items: center; color: var(--ink); display: flex; font-size: 13px; font-weight: 500; gap: 10px; letter-spacing: 0.01em; }
+      .mark svg { color: var(--violet); height: 14px; width: 14px; }
       .quiet {
         background: none; border: 0; border-radius: 999px; color: var(--ink-3); font-size: 13px; padding: 6px 12px;
         transition: color 0.3s, background 0.3s;
       }
-      .quiet:hover { background: var(--glass-2); color: var(--ink); }
+      .quiet:hover { background: var(--wash-2); color: var(--ink); }
 
       /* Constellation progress */
       .constellation { align-items: center; display: flex; gap: 0; opacity: 0; transition: opacity 0.6s var(--ease); }
       .constellation.on { opacity: 1; }
       .constellation .node { height: 9px; position: relative; width: 9px; }
       .constellation .node::before {
-        background: var(--ink-3); border-radius: 50%; content: ""; height: 3px; left: 3px; position: absolute; top: 3px; width: 3px;
+        background: var(--hair-2); border-radius: 50%; content: ""; height: 3px; left: 3px; position: absolute; top: 3px; width: 3px;
         transition: all 0.6s var(--ease);
       }
-      .constellation .node.lit::before { background: var(--ink); box-shadow: 0 0 8px 1px rgb(255 255 255 / 55%); }
+      .constellation .node.lit::before { background: var(--blue); box-shadow: 0 0 8px 1px rgb(47 111 237 / 45%); }
       .constellation .node.here::before { height: 5px; left: 2px; top: 2px; width: 5px; }
       .constellation .link { background: var(--hair); height: 1px; position: relative; width: 34px; }
       .constellation .link::after {
-        background: linear-gradient(90deg, rgb(255 255 255 / 70%), rgb(255 255 255 / 25%)); content: ""; inset: 0; position: absolute;
+        background: linear-gradient(90deg, var(--blue), var(--violet)); content: ""; inset: 0; position: absolute;
         transform: scaleX(0); transform-origin: left; transition: transform 0.8s var(--ease);
       }
       .constellation .link.lit::after { transform: scaleX(1); }
@@ -94,12 +103,15 @@
       .step.shown > :nth-child(4) { transition-delay: 0.18s; }
       .step.shown > :nth-child(5) { transition-delay: 0.24s; }
 
-      .eyebrow { color: var(--ink-3); font: 11px/1 var(--mono); letter-spacing: 0.22em; margin: 0 0 22px; text-transform: uppercase; }
+      .eyebrow { color: var(--violet); font: 11px/1 var(--mono); letter-spacing: 0.22em; margin: 0 0 22px; text-transform: uppercase; }
       h2 {
         font-size: clamp(34px, 5vw, 52px); font-weight: 500; letter-spacing: -0.035em; line-height: 1.04; margin: 0 0 16px;
-        background: linear-gradient(180deg, #ffffff 30%, #b9bcc8); -webkit-background-clip: text; background-clip: text; color: transparent;
+        background: linear-gradient(180deg, var(--ink) 40%, #4a4e5a); -webkit-background-clip: text; background-clip: text; color: transparent;
       }
-      em { font-family: var(--serif); font-style: italic; font-weight: 400; letter-spacing: -0.02em; }
+      em {
+        font-family: var(--serif); font-style: italic; font-weight: 400; letter-spacing: -0.02em;
+        background: linear-gradient(100deg, var(--blue), var(--violet) 55%, var(--pink)); -webkit-background-clip: text; background-clip: text; color: transparent;
+      }
       .sub { color: var(--ink-2); font-size: 16px; margin: 0 0 min(38px, 4vh); max-width: 500px; }
       .stage { scrollbar-width: none; }
       .stage::-webkit-scrollbar { display: none; }
@@ -117,11 +129,11 @@
       .orb .rider { animation: orbit 14s linear infinite; }
       .step:not(.shown) .orb *, .resting .orb * { animation-play-state: paused; }
       @keyframes drift { from { transform: rotate(-24deg); } to { transform: rotate(-14deg); } }
-      @keyframes breathe { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(0.9); opacity: 0.82; } }
+      @keyframes breathe { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(0.94); opacity: 0.88; } }
       @keyframes orbit { to { transform: rotate(360deg); } }
       .wordmark {
         font-size: clamp(52px, min(9vw, 12vh), 104px); font-weight: 300; letter-spacing: -0.055em; line-height: 0.95; margin: 0 0 18px;
-        background: linear-gradient(180deg, #ffffff 35%, #8d91a0 100%); -webkit-background-clip: text; background-clip: text; color: transparent;
+        background: linear-gradient(180deg, var(--ink) 40%, #5d6170 100%); -webkit-background-clip: text; background-clip: text; color: transparent;
       }
       .wordmark span { display: block; font-family: var(--serif); font-size: 0.28em; font-style: italic; font-weight: 400; letter-spacing: -0.01em; margin-bottom: 0.15em; color: var(--ink-2); -webkit-text-fill-color: var(--ink-2); }
 
@@ -129,81 +141,58 @@
       .actions { align-items: center; display: flex; gap: 14px; }
       .intro .actions { justify-content: center; }
       .go {
-        align-items: center; background: var(--ink); border: 0; border-radius: 999px; color: #07070a; display: inline-flex; font-size: 15px; font-weight: 600;
+        align-items: center; background: var(--ink); border: 0; border-radius: 999px; color: #fff; display: inline-flex; font-size: 15px; font-weight: 600;
         gap: 10px; height: 50px; letter-spacing: -0.01em; padding: 0 26px 0 28px; position: relative;
-        box-shadow: 0 0 0 1px rgb(255 255 255 / 40%), 0 10px 40px -8px rgb(200 210 255 / 45%);
+        box-shadow: 0 1px 2px rgb(21 22 26 / 18%), 0 12px 32px -10px rgb(139 92 246 / 55%);
         transition: transform 0.4s var(--ease), box-shadow 0.4s var(--ease), opacity 0.3s;
       }
-      .go:hover { box-shadow: 0 0 0 1px rgb(255 255 255 / 60%), 0 14px 60px -6px rgb(210 220 255 / 70%); transform: translateY(-1px); }
+      .go:hover { box-shadow: 0 1px 2px rgb(21 22 26 / 18%), 0 16px 44px -8px rgb(47 111 237 / 60%); transform: translateY(-1px); }
       .go:active { transform: translateY(0) scale(0.98); }
       .go:disabled { opacity: 0.5; }
       .go svg { height: 14px; transition: transform 0.4s var(--ease); width: 14px; }
       .go:hover svg { transform: translateX(3px); }
       .ghost {
-        background: var(--glass); border: 1px solid var(--hair); border-radius: 999px; color: var(--ink-2); height: 50px; padding: 0 22px;
+        background: rgb(255 255 255 / 85%); border: 1px solid var(--hair-2); border-radius: 999px; color: var(--ink-2); height: 50px; padding: 0 22px;
         transition: background 0.3s, color 0.3s, border-color 0.3s;
       }
-      .ghost:hover { background: var(--glass-2); border-color: var(--hair-2); color: var(--ink); }
+      .ghost:hover { background: var(--paper); border-color: var(--ink-3); color: var(--ink); }
       .ghost:disabled { opacity: 0.5; }
       .kbdhint { color: var(--ink-3); font-size: 12px; margin-left: 6px; }
-      .kbdhint b { border: 1px solid var(--hair-2); border-radius: 5px; font: 11px var(--mono); padding: 1px 5px; }
-      :focus-visible { outline: 1.5px solid rgb(255 255 255 / 80%); outline-offset: 3px; }
+      .kbdhint b { background: var(--paper); border: 1px solid var(--hair-2); border-radius: 5px; font: 11px var(--mono); padding: 1px 5px; }
+      :focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
 
       /* Import */
       .sources { align-items: center; display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; }
       .select { position: relative; }
       .select select {
-        -webkit-appearance: none; appearance: none; background: var(--glass); border: 1px solid var(--hair); border-radius: 999px; color: var(--ink);
+        -webkit-appearance: none; appearance: none; background: rgb(255 255 255 / 85%); border: 1px solid var(--hair-2); border-radius: 999px; color: var(--ink);
         height: 50px; max-width: 360px; min-width: 240px; outline: none; padding: 0 44px 0 22px; text-overflow: ellipsis;
-        -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); transition: border-color 0.3s, background 0.3s;
+        transition: border-color 0.3s, background 0.3s;
       }
-      .select select:hover, .select select:focus { background: var(--glass-2); border-color: var(--hair-2); }
-      .select select option { background: #111216; color: var(--ink); }
-      .select svg { height: 12px; pointer-events: none; position: absolute; right: 20px; top: 19px; width: 12px; }
+      .select select:hover, .select select:focus { background: var(--paper); border-color: var(--ink-3); }
+      .select select option { background: var(--paper); color: var(--ink); }
+      .select svg { color: var(--ink-2); height: 12px; pointer-events: none; position: absolute; right: 20px; top: 19px; width: 12px; }
       .note { color: var(--ink-3); font-size: 13px; min-height: 20px; margin: 0 0 30px; }
-      .note.good { color: #c9f0da; }
-
-      /* Platforms */
-      .platforms { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); margin-bottom: 38px; }
-      .pick {
-        align-items: center; background: var(--glass); border: 1px solid var(--hair); border-radius: 14px; display: flex; gap: 12px;
-        height: 52px; padding: 0 16px; position: relative; text-align: left; overflow: hidden;
-        transition: background 0.35s, border-color 0.35s, color 0.35s, transform 0.35s var(--ease);
-      }
-      .pick::after {
-        background: radial-gradient(60% 120% at 0% 50%, rgb(210 220 255 / 16%), transparent 70%); content: ""; inset: 0; opacity: 0; position: absolute;
-        transition: opacity 0.5s;
-      }
-      .pick, .ghost { -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); }
-      .pick:hover { background: var(--glass-2); border-color: var(--hair-2); }
-      .pick:active { transform: scale(0.98); }
-      .pick .glyph { flex: none; height: 14px; position: relative; width: 14px; z-index: 1; }
-      .pick .glyph path { fill: none; stroke: var(--ink-3); stroke-width: 1.2; transition: all 0.4s var(--ease); }
-      .pick .name { color: var(--ink-2); font-size: 14px; position: relative; transition: color 0.3s; white-space: nowrap; z-index: 1; overflow: hidden; text-overflow: ellipsis; }
-      .pick[aria-pressed="true"] { background: rgb(255 255 255 / 8%); border-color: rgb(255 255 255 / 34%); }
-      .pick[aria-pressed="true"]::after { opacity: 1; }
-      .pick[aria-pressed="true"] .name { color: var(--ink); }
-      .pick[aria-pressed="true"] .glyph path { fill: #fff; stroke: #fff; filter: drop-shadow(0 0 4px rgb(255 255 255 / 90%)); }
-      .count { color: var(--ink-3); font-size: 13px; }
+      .note.good { color: var(--good); }
 
       /* Workspace */
       .field { align-items: center; border-bottom: 1px solid var(--hair-2); display: flex; gap: 16px; margin-bottom: 26px; padding-bottom: 10px; transition: border-color 0.4s; }
-      .field:focus-within { border-color: rgb(255 255 255 / 55%); }
+      .field:focus-within { border-color: var(--blue); }
       .field .halo { border-radius: 50%; flex: none; height: 14px; width: 14px; transition: background 0.4s, box-shadow 0.4s; }
       .field input {
         background: none; border: 0; flex: 1; font-size: clamp(24px, 3.4vw, 32px); font-weight: 400; letter-spacing: -0.025em; min-width: 0; outline: none; padding: 6px 0;
         user-select: text;
       }
-      .field input::placeholder { color: rgb(255 255 255 / 20%); }
+      .field input::placeholder { color: var(--hair-2); }
       .swatches { display: flex; gap: 12px; margin-bottom: 14px; }
       .swatch {
         border: 0; border-radius: 50%; height: 22px; padding: 0; position: relative; width: 22px;
         transition: transform 0.35s var(--ease);
       }
-      .swatch::after { border: 1px solid transparent; border-radius: 50%; content: ""; inset: -5px; position: absolute; transition: border-color 0.3s; }
+      .swatch::after { border: 1.5px solid transparent; border-radius: 50%; content: ""; inset: -5px; position: absolute; transition: border-color 0.3s; }
       .swatch:hover { transform: scale(1.12); }
-      .swatch[aria-pressed="true"]::after { border-color: rgb(255 255 255 / 75%); }
-      .error { color: #ffb3ab; font-size: 13px; min-height: 20px; margin: 0 0 22px; }
+      .swatch[aria-pressed="true"]::after { border-color: var(--ink); }
+      .error { color: var(--bad); font-size: 13px; min-height: 20px; margin: 0 0 22px; }
 
       /* Finale */
       .keys { border-top: 1px solid var(--hair); display: grid; grid-template-columns: 1fr 1fr; margin: 0 0 40px; padding: 0; list-style: none; }
@@ -234,7 +223,6 @@
   <body>
     <canvas id="sky" aria-hidden="true"></canvas>
     <div class="haze" aria-hidden="true"></div>
-    <svg class="grain" aria-hidden="true"><filter id="noise"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch" /><feColorMatrix values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.07 0" /></filter><rect width="100%" height="100%" filter="url(#noise)" /></svg>
 
     <div class="frame">
       <header>
@@ -252,52 +240,58 @@
           <div class="orb" aria-hidden="true">
             <svg viewBox="0 0 300 300">
               <defs>
-                <radialGradient id="glass" cx="50%" cy="50%" r="50%">
-                  <stop offset="0.72" stop-color="#000" stop-opacity="0" />
-                  <stop offset="0.93" stop-color="#ffffff" stop-opacity="0.08" />
-                  <stop offset="1" stop-color="#ffffff" stop-opacity="0.32" />
+                <radialGradient id="glass" cx="42%" cy="36%" r="64%">
+                  <stop offset="0" stop-color="#ffffff" />
+                  <stop offset="0.7" stop-color="#f7f7fb" />
+                  <stop offset="1" stop-color="#e4e6f1" />
                 </radialGradient>
                 <linearGradient id="rim" x1="0" y1="0" x2="1" y2="1">
-                  <stop offset="0" stop-color="#fff" stop-opacity="0.9" />
-                  <stop offset="0.45" stop-color="#fff" stop-opacity="0.08" />
-                  <stop offset="1" stop-color="#fff" stop-opacity="0.55" />
+                  <stop offset="0" stop-color="#ffffff" />
+                  <stop offset="0.5" stop-color="#c9cdda" />
+                  <stop offset="1" stop-color="#eef0f6" />
                 </linearGradient>
                 <linearGradient id="band" x1="0" y1="0" x2="1" y2="0">
-                  <stop offset="0" stop-color="#fff" stop-opacity="0.15" />
-                  <stop offset="0.35" stop-color="#e9ecf5" stop-opacity="0.95" />
-                  <stop offset="0.65" stop-color="#9aa0b0" stop-opacity="0.6" />
-                  <stop offset="1" stop-color="#fff" stop-opacity="0.9" />
+                  <stop offset="0" stop-color="#2f6fed" stop-opacity="0.35" />
+                  <stop offset="0.35" stop-color="#2f6fed" />
+                  <stop offset="0.65" stop-color="#8b5cf6" />
+                  <stop offset="1" stop-color="#d6479a" stop-opacity="0.85" />
+                </linearGradient>
+                <linearGradient id="starfill" x1="0.15" y1="0" x2="0.85" y2="1">
+                  <stop offset="0" stop-color="#2f6fed" />
+                  <stop offset="0.55" stop-color="#8b5cf6" />
+                  <stop offset="1" stop-color="#d6479a" />
                 </linearGradient>
                 <radialGradient id="core" cx="50%" cy="50%" r="50%">
-                  <stop offset="0" stop-color="#fff" stop-opacity="0.95" />
-                  <stop offset="0.25" stop-color="#dfe6ff" stop-opacity="0.35" />
-                  <stop offset="1" stop-color="#fff" stop-opacity="0" />
+                  <stop offset="0" stop-color="#c9d7ff" stop-opacity="0.95" />
+                  <stop offset="0.45" stop-color="#e3d9ff" stop-opacity="0.5" />
+                  <stop offset="1" stop-color="#ffffff" stop-opacity="0" />
                 </radialGradient>
                 <filter id="soft" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="2.2" /></filter>
                 <filter id="bloom" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="10" /></filter>
+                <filter id="shade" x="-50%" y="-200%" width="200%" height="500%"><feGaussianBlur stdDeviation="8" /></filter>
                 <clipPath id="front"><rect x="0" y="150" width="300" height="150" /></clipPath>
               </defs>
+              <ellipse cx="150" cy="292" rx="92" ry="9" fill="#2a2f5a" opacity="0.14" filter="url(#shade)" />
               <circle cx="150" cy="150" r="128" fill="url(#glass)" />
-              <circle cx="150" cy="150" r="127.5" fill="none" stroke="url(#rim)" stroke-width="1.2" />
-              <circle cx="150" cy="150" r="128" fill="none" stroke="#fff" stroke-opacity="0.18" stroke-width="6" filter="url(#soft)" />
-              <path d="M58 92 A128 128 0 0 1 150 22" fill="none" stroke="#fff" stroke-opacity="0.35" stroke-width="1" filter="url(#soft)" />
+              <circle cx="150" cy="150" r="127.5" fill="none" stroke="url(#rim)" stroke-width="1.4" />
+              <path d="M58 92 A128 128 0 0 1 150 22" fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round" filter="url(#soft)" />
             </svg>
             <svg class="ribbon" viewBox="0 0 300 300">
               <!-- back half of the ribbon, behind the star -->
-              <ellipse cx="150" cy="150" rx="118" ry="44" fill="none" stroke="url(#band)" stroke-width="9" stroke-opacity="0.35" />
+              <ellipse cx="150" cy="150" rx="118" ry="44" fill="none" stroke="url(#band)" stroke-width="9" stroke-opacity="0.3" />
             </svg>
             <svg class="spark" viewBox="0 0 300 300">
               <circle cx="150" cy="150" r="70" fill="url(#core)" filter="url(#bloom)" />
-              <path d="M150 50 C153 120 160 147 222 150 C160 153 153 180 150 250 C147 180 140 153 78 150 C140 147 147 120 150 50Z" fill="#fff" />
-              <circle cx="150" cy="150" r="5" fill="#fff" filter="url(#soft)" />
+              <path d="M150 50 C153 120 160 147 222 150 C160 153 153 180 150 250 C147 180 140 153 78 150 C140 147 147 120 150 50Z" fill="url(#starfill)" />
+              <circle cx="150" cy="150" r="4" fill="#ffffff" filter="url(#soft)" />
             </svg>
             <svg class="ribbon" viewBox="0 0 300 300">
               <g clip-path="url(#front)">
                 <ellipse cx="150" cy="150" rx="118" ry="44" fill="none" stroke="url(#band)" stroke-width="9" />
-                <ellipse cx="150" cy="150" rx="118" ry="44" fill="none" stroke="#fff" stroke-opacity="0.8" stroke-width="1" transform="translate(0 -3.5)" />
+                <ellipse cx="150" cy="150" rx="118" ry="44" fill="none" stroke="#ffffff" stroke-opacity="0.85" stroke-width="1" transform="translate(0 -3.5)" />
               </g>
             </svg>
-            <svg class="rider" viewBox="0 0 300 300"><circle cx="150" cy="14" r="1.6" fill="#fff" /><circle cx="150" cy="14" r="5" fill="#fff" opacity="0.25" filter="url(#soft)" /></svg>
+            <svg class="rider" viewBox="0 0 300 300"><circle cx="150" cy="14" r="2.2" fill="#d6479a" /><circle cx="150" cy="14" r="6" fill="#d6479a" opacity="0.25" filter="url(#soft)" /></svg>
           </div>
           <h1 class="wordmark" id="t-intro"><span>Welcome to</span>Stardust</h1>
           <p class="sub">A browser for people who <em>make</em> things. Let's set it up. It takes about a minute, and you can change all of it later.</p>
@@ -321,19 +315,6 @@
           <div class="actions">
             <button class="go" data-next type="button">Continue <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg></button>
             <button class="ghost" data-back type="button">Back</button>
-          </div>
-        </section>
-
-        <!-- Platforms -->
-        <section class="step" data-step="platforms" aria-labelledby="t-platforms">
-          <p class="eyebrow" data-eyebrow>Your orbit</p>
-          <h2 id="t-platforms">Where do you <em>create?</em></h2>
-          <p class="sub">Choose the places you work. They're saved to your bookmarks, one click away.</p>
-          <div class="platforms" id="platforms" role="group" aria-label="Platforms"></div>
-          <div class="actions">
-            <button class="go" data-next type="button">Continue <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg></button>
-            <button class="ghost" data-back type="button">Back</button>
-            <span class="count" id="count"></span>
           </div>
         </section>
 
@@ -386,7 +367,9 @@
       const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
       const STAR = "M7 0.6C7.4 4.6 9.4 6.6 13.4 7 9.4 7.4 7.4 9.4 7 13.4 6.6 9.4 4.6 7.4 0.6 7 4.6 6.6 6.6 4.6 7 0.6Z";
 
-      // ---- Sky -------------------------------------------------------------------------
+      // ---- Stardust --------------------------------------------------------------------
+      // Specks in the workspace colours, drifting and twinkling on white.
+      const TINTS = ["47,111,237", "139,92,246", "214,71,154", "20,163,163", "217,142,31", "123,127,138"];
       const sky = byId("sky");
       const ctx = sky.getContext("2d");
       let stars = [], width = 0, height = 0, pointerX = 0, pointerY = 0, lean = { x: 0, y: 0 };
@@ -419,14 +402,14 @@
         sky.width = width * ratio; sky.height = height * ratio;
         sky.style.width = width + "px"; sky.style.height = height + "px";
         ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-        const count = Math.round((width * height) / 2600);
+        const count = Math.round((width * height) / 4200);
         stars = Array.from({ length: count }, () => {
           const depth = Math.random() ** 2.2;
           return {
             x: Math.random() * width, y: Math.random() * height, depth,
-            r: 0.25 + depth * 1.25, base: 0.18 + depth * 0.7,
+            r: 0.4 + depth * 1.4, base: 0.14 + depth * 0.5,
             speed: 0.4 + Math.random() * 1.6, phase: Math.random() * Math.PI * 2,
-            tint: Math.random() < 0.15 ? "210,220,255" : Math.random() < 0.06 ? "255,236,214" : "255,255,255",
+            tint: TINTS[Math.floor(Math.random() * TINTS.length)],
             flare: depth > 0.82 && Math.random() < 0.5,
           };
         });
@@ -471,7 +454,7 @@
               const hx = meteor.x + Math.cos(meteor.angle) * travel, hy = meteor.y + Math.sin(meteor.angle) * travel;
               const tx = hx - Math.cos(meteor.angle) * tail, ty = hy - Math.sin(meteor.angle) * tail;
               const g = ctx.createLinearGradient(hx, hy, tx, ty);
-              g.addColorStop(0, `rgba(255,255,255,${0.85 * Math.sin(Math.PI * life)})`); g.addColorStop(1, "rgba(255,255,255,0)");
+              g.addColorStop(0, `rgba(139,92,246,${0.7 * Math.sin(Math.PI * life)})`); g.addColorStop(1, "rgba(47,111,237,0)");
               ctx.strokeStyle = g; ctx.lineWidth = 1.1;
               ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(tx, ty); ctx.stroke();
             }
@@ -486,7 +469,7 @@
       // ---- Steps -----------------------------------------------------------------------
       const sections = Object.fromEntries([...document.querySelectorAll(".step")].map((el) => [el.dataset.step, el]));
       let hasImport = false;
-      let flow = () => ["intro", ...(hasImport ? ["import"] : []), "platforms", "workspace", "done"];
+      let flow = () => ["intro", ...(hasImport ? ["import"] : []), "workspace", "done"];
       let current = "intro";
 
       function renderProgress() {
@@ -538,7 +521,7 @@
       document.querySelectorAll("[data-next]").forEach((b) => b.addEventListener("click", () => step(1)));
       document.querySelectorAll("[data-back]").forEach((b) => b.addEventListener("click", () => step(-1)));
       byId("skip").addEventListener("click", () => {
-        chosen.clear(); byId("workspace").value = "";
+        byId("workspace").value = "";
         finish();
       });
       addEventListener("keydown", (e) => {
@@ -560,40 +543,6 @@
         byId("import-note").textContent = "Bringing things over…";
         send({ type: "import", source: byId("import-source").value });
       });
-
-      // ---- Platforms -------------------------------------------------------------------
-      const chosen = new Set();
-      let platformNames = {};
-      function renderPlatforms(platforms) {
-        platformNames = Object.fromEntries(platforms.map((p) => [p.id, p.name]));
-        byId("platforms").replaceChildren(...platforms.map((platform) => {
-          const pick = document.createElement("button");
-          pick.type = "button";
-          pick.className = "pick";
-          pick.setAttribute("aria-pressed", String(chosen.has(platform.id)));
-          const glyph = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-          glyph.setAttribute("viewBox", "0 0 14 14");
-          glyph.setAttribute("class", "glyph");
-          glyph.setAttribute("aria-hidden", "true");
-          const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-          path.setAttribute("d", STAR);
-          glyph.append(path);
-          const name = document.createElement("span");
-          name.className = "name";
-          name.textContent = platform.name;
-          pick.append(glyph, name);
-          pick.addEventListener("click", () => {
-            if (chosen.has(platform.id)) chosen.delete(platform.id); else chosen.add(platform.id);
-            pick.setAttribute("aria-pressed", String(chosen.has(platform.id)));
-            renderCount();
-          });
-          return pick;
-        }));
-        renderCount();
-      }
-      function renderCount() {
-        byId("count").textContent = chosen.size ? `${chosen.size} chosen` : "";
-      }
 
       // ---- Workspace -------------------------------------------------------------------
       const COLORS = ["blue", "green", "red", "amber", "purple", "pink", "teal", "gray"];
@@ -641,22 +590,19 @@
 
       function renderSummary() {
         const line = byId("summary");
-        const names = [...chosen].map((id) => platformNames[id]).filter(Boolean);
         const workspace = byId("workspace").value.trim();
-        const bold = (text) => Object.assign(document.createElement("b"), { textContent: text });
-        const parts = [];
-        if (names.length) parts.push([bold(names.length === 1 ? names[0] : `${names.length} places`), " to your bookmarks"]);
-        if (workspace) parts.push(["a workspace called ", bold(workspace)]);
         line.replaceChildren();
-        if (!parts.length) { line.append("A few keys worth knowing before you go."); return; }
-        line.append("We'll add ", ...parts[0], ...(parts[1] ? [", and ", ...parts[1]] : []), ". A few keys worth knowing:");
+        if (!workspace) { line.append("A few keys worth knowing before you go."); return; }
+        const bold = Object.assign(document.createElement("b"), { textContent: workspace });
+        line.append("We'll make a workspace called ", bold, ". A few keys worth knowing:");
       }
 
       function finish() {
         byId("workspace-error").textContent = "";
         byId("finish").disabled = true;
         byId("skip").disabled = true;
-        send({ type: "finishWelcome", platforms: [...chosen], workspace: byId("workspace").value, color });
+        // Sites aren't asked for here: people add their own when they're ready.
+        send({ type: "finishWelcome", platforms: [], workspace: byId("workspace").value, color });
       }
       byId("finish").addEventListener("click", finish);
 
@@ -671,8 +617,6 @@
           byId("import").disabled = byId("import-source").disabled = false;
           byId("import-note").className = "note good";
           byId("import-note").textContent = `Brought over ${event.bookmarks} bookmarks and ${event.history} history entries.`;
-        } else if (event.type === "platforms") {
-          renderPlatforms(event.platforms);
         } else if (event.type === "welcomeResult" && event.error) {
           byId("finish").disabled = false;
           byId("skip").disabled = false;
@@ -682,7 +626,6 @@
       };
 
       show("intro");
-      send({ type: "listPlatforms" });
       send({ type: "listImportSources" });
     </script>
   </body>
