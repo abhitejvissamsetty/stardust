@@ -17,8 +17,7 @@ Read first: [roadmap.md](roadmap.md), then [milestone-3.md](milestone-3.md) and 
 |---|---|---|
 | Update server | Any HTTPS host serving a folder. GitHub Releases once the project is on GitHub | Updates reaching anyone |
 | Real release signing key | Make with `cargo xtask keygen`, keep the private key offline | Updates reaching anyone |
-| H.264 and AAC approach | Firefox's way or Brave's way, see below | Many sites' video |
-| Legal advice on H.264 and AAC | Needed for Brave's way | Brave's way |
+| Build machine for custom CEF | A cloud VM or a bigger computer, see section 7 | H.264 and AAC video |
 | Extensions | Stay without, or move to CEF's Chrome style, see below | Nothing now |
 
 ## 1. Milestone 2: a week of daily use
@@ -62,9 +61,8 @@ The updater works end to end on macOS (see [milestone-4.md](milestone-4.md#updat
 2. Choose the server, and build releases with `STARDUST_UPDATE_URL=https://…/manifest.json`.
 3. **macOS signing and notarization** for releases. Not set up. An update replaces the app with whatever is in the signed package.
 4. **Install folders an administrator owns,** such as an app installed for all users, can't update. Needs a privileged helper or a per-user install.
-5. **Restart after updating** doesn't pass on the original command line (`crates/cef-host/src/updates.rs`, `restart_if_asked`).
-6. Run the update flow on Linux and Windows.
-7. Then remove the README's warning against logins and banking.
+5. Run the update flow on Windows. Linux passed on 2026-11-24.
+6. Then remove the README's warning against logins and banking.
 
 **Done when:** an installed build updates itself to a newer signed build on all three systems.
 
@@ -78,23 +76,43 @@ Nothing from Milestones 3 and 4 has run on Linux. In particular:
 
 - **VA-API:** Stardust now adds `AcceleratedVideoDecodeLinuxGL,VaapiVideoDecoder` when a `*_drv_video.so` driver is found (`crates/bridge/src/video.rs`). Check `chrome://gpu` shows hardware decoding, and measure CPU on a video as in Milestone 0.
 - **Saved passwords** use the Secret Service through the `keyring` crate, which needs D-Bus (`libdbus-1-dev`, added to CI). Untested.
-- **Cookie encryption** depends on a desktop keyring. Without one, Chromium falls back to a fixed key. Check which happens on a normal desktop.
+- **Cookie encryption** uses the desktop keyring when it's unlocked. Stardust checks it first (`crates/cef-host/src/secret_store.rs`): a locked keyring, or none, used to stop every page loading, because Chromium waited forever for an unlock prompt that couldn't appear. Now Stardust falls back to Chromium's built-in key, turns off saving passwords for that run, and says so. Tested on 2026-11-24 with unlocked, locked and missing keyrings. Cookies saved with the keyring stay readable once it's unlocked again. Not tested: KDE's KWallet, which Stardust leaves to Chromium.
 - **`perf`** has Linux code paths (`/proc`, PSS) that changed in Milestone 3.
 
 ## 7. H.264 and AAC video
 
-Stock CEF builds leave these out, so many sites' videos fail. The owner wants to follow Firefox or Brave, which differ:
+Stock CEF builds leave these out, so many sites' videos fail. **Decided on 2026-11-25: Firefox's way.** Stardust ships no H.264 or AAC decoders of its own and uses the operating system's, which the OS maker has licensed. Brave's way (shipping Chromium's FFmpeg decoders) was set aside over patent licensing: the last US H.264 patent in the Via LA pool is reported to expire on 29 November 2027, and AAC-LC's status isn't confirmed by any licensor.
 
-| | Firefox's way | Brave's way |
+### Plan per system
+
+| System | H.264 video | AAC audio |
 |---|---|---|
-| How | Uses the operating system's decoders, ships none itself. Cisco's OpenH264 module covers WebRTC | Ships Chromium's FFmpeg decoders for H.264 and AAC |
-| For CEF | Custom build with `proprietary_codecs=true` but without `ffmpeg_branding=Chrome`, which needs a patch to an assert in `media/BUILD.gn`. See [CEF issue #3559](https://github.com/chromiumembedded/cef/issues/3559) | Custom build with `proprietary_codecs=true ffmpeg_branding=Chrome` |
-| Works | Partly. The CEF maintainer got H.264 working through Media Foundation (Windows) and VideoToolbox (macOS) in 2023, but **AAC didn't work**, and Chromium's AAC parsing may need replacing. Nothing has landed in CEF. Vivaldi's `platform_media` code was suggested as a reference. Linux would need system FFmpeg | Yes, on every platform |
-| Patent risk | Low: no decoders shipped | Ships patent-licensed decoders. Brave does ship H.264, but how it handles licensing wasn't found. **Needs legal advice** |
+| Windows | Chromium's hardware decoder (D3D11). Works in CEF with only the build patch below ([CEF #3559](https://github.com/chromiumembedded/cef/issues/3559)) | Chromium's `MediaFoundationAudioDecoder`, which today only takes xHE-AAC. Cromite's patch shows the change: let it take all AAC and make FFmpeg refuse AAC ([Cromite #856](https://github.com/uazo/cromite/pull/856)) |
+| macOS | Chromium's VideoToolbox decoder. Works with the build patch (CEF #3559) | Chromium's `AudioToolboxAudioDecoder`, which today only takes xHE-AAC. The same change as Windows. Untried by anyone found |
+| Linux | VA-API, which Stardust already turns on when a driver is installed | No OS decoder exists. Build FFmpeg as a separate `libffmpeg.so` (`is_component_ffmpeg=true`) without the codecs, so a person or distribution can swap in one with them, as Opera and Vivaldi do. Or a Flatpak using the FFmpeg extension |
 
-Recommendation: Brave's way if a lawyer signs off, because it works today. Otherwise Firefox's way, starting with H.264.
+### Build settings
 
-Either way, the first step is a **build server for custom CEF**: a Chromium build needs about 100 GB or more of disk and hours of compiling per platform, then hosting the results and rebuilding for every CEF security update. `cef-rs` downloads stock CEF today, so the build would need pointing at custom binaries. The Mac used so far had under 2 GB free and can't do it.
+- `proprietary_codecs=true` with `ffmpeg_branding="Chromium"`, so the H.264 and AAC parsers are built but FFmpeg's decoders for them aren't. Cromite builds with `ffmpeg_branding="Chrome"` and only refuses the decoders at run time, which still ships them, so it isn't followed there.
+- GN asserts that `proprietary_codecs` needs Chrome branding. CEF #3559 has a three-line patch to `media/BUILD.gn` that skips the assert for CEF builds.
+- New flags, as in Cromite: one to send AAC to the platform decoder and one to keep H.264 off FFmpeg. Cromite's patch is GPL-2.0, so Stardust's must be written fresh, not copied. Stardust's own code is MPL-2.0.
+- Unknown until built: whether FFmpeg's MP4 demuxer still passes AAC tracks with Chromium branding. In CEF #3559's test it skipped them, possibly only because no decoder accepted them.
+
+### Limits of this way
+
+- No software fallback: a computer without a hardware H.264 decoder, such as a virtual machine or an old graphics card, plays no H.264.
+- Windows needs its AAC decoder (`msauddecmft.dll`), missing from some "N" editions.
+- Linux without VA-API, or without a swapped-in FFmpeg, plays neither.
+
+### The build
+
+The patch and build script are in [cef-build/](../cef-build/README.md). The patch applies to Chromium 156.0.8078.48, GN accepts the settings, and the one patched file Linux builds compiles. Nothing has been built in full or run yet.
+
+- CEF 156.0.14 (commit `4fa4ab5`, Chromium 156.0.8078.48, CEF branch 8078), matching the `cef` crate. Build with CEF's `automate-git.py --branch=8078 --checkout=4fa4ab5`, with the settings above in `GN_DEFINES`.
+- Each system builds on its own kind of computer: Linux on Linux, Windows on Windows, macOS on a Mac.
+- Needs at least 16 GB RAM, 32 GB or more recommended, about 200 GB of disk, and about 4 hours on 16 cores ([CEF build guide](https://chromiumembedded.github.io/cef/master_build_quick_start)). The Linux computer used so far has 4 cores and 7 GB RAM, which isn't enough.
+- Stardust then uses it without code changes: `cef-rs` takes a local build from `CEF_PATH`, or downloads from `CEF_DOWNLOAD_URL`.
+- Every CEF security release needs the build again, on all three systems, so it should become automatic.
 
 ## 8. Saved passwords: limits
 
@@ -104,14 +122,24 @@ In `crates/cef-host/src/client.rs` (`offer_to_save_login`, `fill_login`), `crate
 - **Several logins for one site:** the key button fills the most recent one. Needs a chooser, for example in the menu under the toolbar.
 - **Logins split over two pages,** and login forms inside frames, aren't handled.
 
-## 9. Permission prompts: limits
+## 9. Not for important accounts yet
+
+What still stands between Stardust and real logins or banking, as of 2026-11-24:
+
+1. **Security updates don't reach anyone** until the real signing key and a release server exist (section 4). This is the main reason.
+2. **No Safe Browsing.** Chromium's malware and phishing checks need Google's service and aren't in CEF. Downloads aren't checked either.
+3. **Google sign-in** loads, but whether Google lets a CEF browser finish signing in wasn't tested, because it needs a real account. Sign-in popups that send a result back to the page that opened them work.
+
+Fixed on 2026-11-24: a site with a bad certificate now shows "This connection isn't secure" with no way past it. Before, the tab stayed blank and the address bar showed a padlock. The padlock no longer shows for a page stopped by a certificate error. It still goes by the address alone otherwise, so it doesn't reflect mixed content.
+
+## 10. Permission prompts: limits
 
 - **Location** uses the same path as the camera, but was never tested end to end, to avoid macOS's real location prompt.
 - **Notifications** are refused: Alloy-style CEF can't show them.
 - **Sharing the screen** is refused: it needs a picker.
 - **Escape** on a prompt counts as Block and is remembered. Chrome treats closing a prompt as no answer.
 
-## 10. Extensions
+## 11. Extensions
 
 **Updated 2026-11-17: extensions now work.** An earlier version of this section said they couldn't without moving to CEF's Chrome style. That was wrong: Chromium's extension system runs in Alloy style too, and loads any folder given to `--load-extension`. Stardust has an extensions hub, a toolbar menu, pinned buttons and popups. See [milestone-5.md](milestone-5.md#extensions) for what works and what doesn't.
 
@@ -124,13 +152,13 @@ What's left:
 5. **Extension updates**, which the Web Store would normally handle.
 6. Test on Linux and Windows.
 
-## 11. Looked at, but not by a person
+## 12. Looked at, but not by a person
 
 **Updated 2026-11-17.** Stardust's own pages can now be looked at without the screen: `python3 scripts/cdp.py shot <page> file.png` saves a picture of the toolbar, a menu, Settings or the extensions hub, which was how Milestone 5 was checked. What can't be seen that way is the native window frame. Have a person check: the window's close, minimize and zoom buttons (**minimize didn't register in tests**), the permission and save-password prompts, print and developer tools, and that nothing looks wrong at other screen sizes or text sizes.
 
 Also: one unexplained "Google" tab appeared once during testing and didn't come back. See [milestone-5.md](milestone-5.md#a-stray-tab).
 
-## 12. Workspaces
+## 13. Workspaces
 
 Built in [milestone-6.md](milestone-6.md). What's left:
 

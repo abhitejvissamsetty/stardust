@@ -1,0 +1,273 @@
+--- media/base/win/mf_helpers.cc
++++ media/base/win/mf_helpers.cc
+@@ -540,6 +540,12 @@
+   size_t extra_size = wave_format_size - sizeof(WAVEFORMATEX);
+   aac_wave_format->wfx.cbSize = static_cast<WORD>(extra_size);
+   aac_wave_format->wPayloadType = 0;  // RAW AAC
++#if BUILDFLAG(USE_OS_PROPRIETARY_DECODERS)
++  // See MediaFoundationAudioDecoder::NeedsBitstreamConversion().
++  if (decoder_config.profile() != AudioCodecProfile::kXHE_AAC) {
++    aac_wave_format->wPayloadType = 1;  // ADTS
++  }
++#endif
+   aac_wave_format->wAudioProfileLevelIndication =
+       0xFE;                          // no audio profile specified
+   aac_wave_format->wStructType = 0;  // audio specific config follows
+--- media/BUILD.gn
++++ media/BUILD.gn
+@@ -68,6 +68,7 @@
+     "USE_CHROMEOS_PROTECTED_MEDIA=$use_chromeos_protected_media",
+     "USE_CRAS=$use_cras",
+     "USE_PROPRIETARY_CODECS=$proprietary_codecs",
++    "USE_OS_PROPRIETARY_DECODERS=$use_os_proprietary_decoders",
+     "ENABLE_GPU_CHANNEL_MEDIA_CAPTURE=$enable_gpu_channel_media_capture",
+     "USE_OPENSLES=$media_use_opensles",
+   ]
+@@ -87,7 +88,9 @@
+   }
+ }
+ 
+-if (proprietary_codecs && media_use_ffmpeg) {
++# Stardust: use_os_proprietary_decoders builds FFmpeg without these decoders on
++# purpose.
++if (proprietary_codecs && media_use_ffmpeg && !use_os_proprietary_decoders) {
+   assert(
+       ffmpeg_branding != "Chromium",
+       "proprietary codecs and ffmpeg_branding set to Chromium are incompatible")
+--- media/ffmpeg/ffmpeg_common.cc
++++ media/ffmpeg/ffmpeg_common.cc
+@@ -409,6 +409,15 @@
+       sample_format = kSampleFormatMpegHAudio;
+       break;
+ #endif
++#if BUILDFLAG(USE_OS_PROPRIETARY_DECODERS)
++    // As for AC3/EAC3, FFmpeg only demuxes AAC here, so it doesn't fill
++    // |sample_fmt|. The operating system's decoder outputs planar float.
++    case AudioCodec::kAAC:
++      if (sample_format == kUnknownSampleFormat) {
++        sample_format = kSampleFormatPlanarF32;
++      }
++      break;
++#endif
+ 
+     default:
+       break;
+--- media/filters/mac/audio_toolbox_audio_decoder.cc
++++ media/filters/mac/audio_toolbox_audio_decoder.cc
+@@ -40,13 +40,34 @@
+     return true;
+   }
+ #endif
++#if BUILDFLAG(USE_OS_PROPRIETARY_DECODERS)
++  // Stardust decodes all AAC with AudioToolbox.
++  if (config.codec() == AudioCodec::kAAC) {
++    return true;
++  }
++#endif
+   // We use AudioToolbox for decoding xHE-AAC content and that's available on
+   // macOS 10.15 or higher.
+   return config.profile() == AudioCodecProfile::kXHE_AAC;
+ }
+ 
++#if BUILDFLAG(USE_OS_PROPRIETARY_DECODERS)
++// The size of the ADTS header at the start of `data`, or 0 if there isn't one.
++// Media Source Extensions add these to AAC; AudioToolbox takes raw AAC.
++size_t AdtsHeaderSize(base::span<const uint8_t> data) {
++  if (data.size() < 7 || data[0] != 0xFF || (data[1] & 0xF6) != 0xF0) {
++    return 0;
++  }
++  // Without CRC protection the header is 7 bytes, and with it 9.
++  const size_t size = (data[1] & 0x01) ? 7 : 9;
++  return data.size() > size ? size : 0;
++}
++#endif
++
+ struct InputData {
+   raw_ptr<DecoderBuffer> buffer = nullptr;
++  // How many bytes at the start of `buffer` to skip, such as an ADTS header.
++  size_t offset = 0;
+   AudioStreamPacketDescription packet = {};
+ };
+ 
+@@ -67,11 +88,12 @@
+ 
+   *num_packets = buffer_list->mNumberBuffers = 1;
+   buffer_list->mBuffers[0].mNumberChannels = 0;
+-  buffer_list->mBuffers[0].mDataByteSize = input_data->buffer->size();
++  buffer_list->mBuffers[0].mDataByteSize =
++      input_data->buffer->size() - input_data->offset;
+ 
+   // No const version of this API unfortunately, so we need const_cast().
+-  buffer_list->mBuffers[0].mData =
+-      const_cast<uint8_t*>(base::span(*input_data->buffer).data());
++  buffer_list->mBuffers[0].mData = const_cast<uint8_t*>(
++      base::span(*input_data->buffer).subspan(input_data->offset).data());
+ 
+   if (packets)
+     *packets = &input_data->packet;
+@@ -171,7 +193,12 @@
+       return;
+     }
+     last_input_timestamp_ = buffer->timestamp();
+-    input_data.packet.mDataByteSize = buffer->size();
++#if BUILDFLAG(USE_OS_PROPRIETARY_DECODERS)
++    if (strips_adts_headers_) {
++      input_data.offset = AdtsHeaderSize(base::span(*buffer));
++    }
++#endif
++    input_data.packet.mDataByteSize = buffer->size() - input_data.offset;
+   }
+ 
+   // Must be filled in each time in case AudioConverterFillComplexBuffer()
+@@ -269,12 +296,21 @@
+ bool AudioToolboxAudioDecoder::CreateDecoder(const AudioDecoderConfig& config) {
+   AudioStreamBasicDescription input_format = {};
+   std::vector<uint8_t> magic_cookie;
++  strips_adts_headers_ = false;
+ 
+   switch (config.codec()) {
+     case AudioCodec::kAAC: {
++#if BUILDFLAG(USE_OS_PROPRIETARY_DECODERS)
++      // Input is xHE-AAC / USAC, or any other AAC, described the same way by
++      // its AudioSpecificConfig.
++      strips_adts_headers_ = config.profile() != AudioCodecProfile::kXHE_AAC;
++      input_format.mFormatID = strips_adts_headers_ ? kAudioFormatMPEG4AAC
++                                                    : kAudioFormatMPEGD_USAC;
++#else
+       // Input is xHE-AAC / USAC.
+       CHECK_EQ(config.profile(), AudioCodecProfile::kXHE_AAC);
+       input_format.mFormatID = kAudioFormatMPEGD_USAC;
++#endif
+       magic_cookie = mp4::ESDescriptor::CreateEsds(config.extra_data());
+ 
+       // Have macOS fill in the rest of the input_format for us.
+@@ -424,7 +460,10 @@
+           << "AudioConverterSetProperty() failed";
+       return false;
+     }
++  }
+ 
++  if (config.codec() == AudioCodec::kAAC &&
++      config.profile() == AudioCodecProfile::kXHE_AAC) {
+     // macOS doesn't provide a default target loudness. Use the value
+     // recommended by Fraunhofer. AC3/E-AC3 doesn't support set this,
+     // so limit this to xHE-AAC only.
+--- media/filters/mac/audio_toolbox_audio_decoder.h
++++ media/filters/mac/audio_toolbox_audio_decoder.h
+@@ -75,6 +75,10 @@
+   std::unique_ptr<AudioBus> output_bus_;
+   std::unique_ptr<AudioBufferList, base::FreeDeleter> output_buffer_list_;
+ 
++  // Whether plain AAC is being decoded, whose input may carry ADTS headers that
++  // AudioToolbox doesn't expect.
++  bool strips_adts_headers_ = false;
++
+   // Keeps track of the last input timestamp to use for output generated during
+   // flush (EOS).
+   base::TimeDelta last_input_timestamp_ = kNoTimestamp;
+--- media/filters/win/media_foundation_audio_decoder.cc
++++ media/filters/win/media_foundation_audio_decoder.cc
+@@ -27,6 +27,7 @@
+ #include "media/base/win/hresults.h"
+ #include "media/base/win/mf_helpers.h"
+ #include "media/base/win/mf_initializer.h"
++#include "media/media_buildflags.h"
+ 
+ namespace media {
+ 
+@@ -101,6 +102,11 @@
+ #endif
+ #if BUILDFLAG(USE_PROPRIETARY_CODECS)
+     case AudioCodec::kAAC:
++#if BUILDFLAG(USE_OS_PROPRIETARY_DECODERS)
++      if (config.profile() != AudioCodecProfile::kXHE_AAC) {
++        return MFT_REGISTER_TYPE_INFO{MFMediaType_Audio, MFAudioFormat_AAC};
++      }
++#endif
+       if (config.profile() == AudioCodecProfile::kXHE_AAC &&
+           base::win::GetVersion() >= base::win::Version::WIN11_22H2) {
+         return MFT_REGISTER_TYPE_INFO{MFMediaType_Audio, MFAudioFormat_AAC};
+@@ -334,6 +340,15 @@
+ }
+ 
+ bool MediaFoundationAudioDecoder::NeedsBitstreamConversion() const {
++#if BUILDFLAG(USE_OS_PROPRIETARY_DECODERS)
++  // Plain AAC arrives with ADTS headers either way: Media Source Extensions add
++  // them, and this asks the FFmpeg demuxer to add them too. GetAacAudioType()
++  // tells the decoder to expect them.
++  if (config_.codec() == AudioCodec::kAAC &&
++      config_.profile() != AudioCodecProfile::kXHE_AAC) {
++    return true;
++  }
++#endif
+   // DTS does not require any header/bit stream conversion
+   return false;
+ }
+--- media/media_options.gni
++++ media/media_options.gni
+@@ -78,6 +78,12 @@
+   # on-device decoding as supported by device.
+   enable_platform_ac4_audio = false
+ 
++  # Stardust: plays H.264 and AAC with the operating system's decoders only.
++  # FFmpeg still demuxes them, but is built without their decoders
++  # (ffmpeg_branding = "Chromium"). On Windows and macOS, AAC goes to Media
++  # Foundation or AudioToolbox, which Chromium otherwise uses only for xHE-AAC.
++  use_os_proprietary_decoders = false
++
+   enable_platform_mpeg_h_audio = proprietary_codecs && is_cast_media_device
+ 
+   # Enables DTS/DTSX audio handling in chromium. This includes demuxing,
+@@ -179,6 +185,8 @@
+        "proprietary_codecs required for enable_hls_demuxer")
+ assert(!enable_platform_ac3_eac3_audio || proprietary_codecs,
+        "proprietary_codecs required for enable_platform_ac3_eac3_audio")
++assert(!use_os_proprietary_decoders || proprietary_codecs,
++       "proprietary_codecs required for use_os_proprietary_decoders")
+ assert(!enable_platform_ac4_audio || proprietary_codecs,
+        "proprietary_codecs required for enable_platform_ac4_audio")
+ assert(!enable_platform_mpeg_h_audio || proprietary_codecs,
+--- media/mojo/services/gpu_mojo_media_client_mac.cc
++++ media/mojo/services/gpu_mojo_media_client_mac.cc
+@@ -11,6 +11,7 @@
+ #include "media/filters/mac/audio_toolbox_audio_decoder.h"
+ #include "media/filters/mac/audio_toolbox_audio_encoder.h"
+ #include "media/gpu/mac/video_toolbox_video_decoder.h"
++#include "media/media_buildflags.h"
+ #include "media/mojo/services/gpu_mojo_media_client.h"
+ 
+ namespace media {
+@@ -33,6 +34,9 @@
+   GetPlatformSupportedAudioDecoderConfigs() final {
+     SupportedAudioDecoderConfigs audio_configs;
+     audio_configs.emplace_back(AudioCodec::kAAC, AudioCodecProfile::kXHE_AAC);
++#if BUILDFLAG(USE_OS_PROPRIETARY_DECODERS)
++    audio_configs.emplace_back(AudioCodec::kAAC, AudioCodecProfile::kUnknown);
++#endif
+ #if BUILDFLAG(ENABLE_PLATFORM_AC3_EAC3_AUDIO)
+     audio_configs.emplace_back(AudioCodec::kAC3, AudioCodecProfile::kUnknown);
+     audio_configs.emplace_back(AudioCodec::kEAC3, AudioCodecProfile::kUnknown);
+--- media/mojo/services/gpu_mojo_media_client_win.cc
++++ media/mojo/services/gpu_mojo_media_client_win.cc
+@@ -29,6 +29,7 @@
+ #include "media/gpu/windows/d3d12_helpers.h"
+ #include "media/gpu/windows/d3d_video_decoder.h"
+ #include "media/gpu/windows/mf_audio_encoder.h"
++#include "media/media_buildflags.h"
+ 
+ namespace media {
+ 
+@@ -105,6 +106,13 @@
+         InitializeMediaFoundation()) {
+       audio_configs.emplace_back(AudioCodec::kAAC, AudioCodecProfile::kXHE_AAC);
+     }
++#if BUILDFLAG(USE_OS_PROPRIETARY_DECODERS)
++    // Every other AAC profile goes to Windows' own AAC decoder. Some "N"
++    // editions of Windows lack it, and then the decoder fails to start.
++    if (InitializeMediaFoundation()) {
++      audio_configs.emplace_back(AudioCodec::kAAC, AudioCodecProfile::kUnknown);
++    }
++#endif
+ 
+     return audio_configs;
+   }
