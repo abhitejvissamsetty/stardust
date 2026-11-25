@@ -55,6 +55,30 @@ fn staging() -> Option<PathBuf> {
     crate::data_dir().map(|folder| folder.join("updates"))
 }
 
+/// This install's rollout group, from 0 to 99, picked at random once and kept. A
+/// release that's rolling out step by step reaches the lowest groups first.
+fn rollout_group() -> u8 {
+    use std::hash::{BuildHasher, Hasher};
+    let path = crate::data_dir().map(|folder| folder.join("update-group"));
+    let saved = path
+        .as_ref()
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|text| text.trim().parse::<u8>().ok())
+        .filter(|group| *group < 100);
+    if let Some(group) = saved {
+        return group;
+    }
+    // Rust seeds each hasher's keys at random, which is all this needs.
+    let group = (std::collections::hash_map::RandomState::new()
+        .build_hasher()
+        .finish()
+        % 100) as u8;
+    if let Some(path) = path {
+        let _ = std::fs::write(path, group.to_string());
+    }
+    group
+}
+
 /// The address of the release list: `--update-url`, or the one built in with
 /// `STARDUST_UPDATE_URL`. Releases are signed, so the address doesn't need trusting.
 fn manifest_url(command_line_url: Option<String>) -> Option<String> {
@@ -103,7 +127,7 @@ pub fn start(command_line_url: Option<String>) {
     std::thread::spawn(|| {
         std::thread::sleep(FIRST_CHECK);
         loop {
-            check_now();
+            check_now(false);
             std::thread::sleep(CHECK_EVERY);
         }
     });
@@ -112,7 +136,8 @@ pub fn start(command_line_url: Option<String>) {
 static URL: Mutex<Option<String>> = Mutex::new(None);
 
 /// Checks for a new version and downloads it. Does nothing if a check is running.
-pub fn check_now() {
+/// `asked` is true when the person asked, so a release rolling out reaches them anyway.
+pub fn check_now(asked: bool) {
     let Some(url) = URL.lock().expect("Failed to lock update address").clone() else {
         return;
     };
@@ -123,7 +148,8 @@ pub fn check_now() {
         set_status(Status::Checking);
     }
     let result = (|| {
-        let Some(release) = update::check(&url, VERSION)? else {
+        let group = (!asked).then(rollout_group);
+        let Some(release) = update::check(&url, VERSION, group)? else {
             return Ok(None);
         };
         let staging =
@@ -139,9 +165,15 @@ pub fn check_now() {
         update::download(&release, &staging)?;
         Ok::<_, update::Error>(Some(release.version))
     })();
+    // A version downloaded earlier, perhaps when the person asked, still installs
+    // even when this install isn't yet in that release's rollout.
+    let staged = || staging().and_then(|staging| update::staged_version(&staging, VERSION));
     set_status(match result {
         Ok(Some(version)) => Status::Ready { version },
-        Ok(None) => Status::UpToDate,
+        Ok(None) => match staged() {
+            Some((version, _)) => Status::Ready { version },
+            None => Status::UpToDate,
+        },
         Err(error) => Status::Failed {
             message: error.to_string(),
         },
@@ -149,9 +181,9 @@ pub fn check_now() {
     BUSY.store(false, Ordering::SeqCst);
 }
 
-/// Checks without holding up the caller.
+/// Checks without holding up the caller, for the person who asked.
 pub fn check_in_background() {
-    std::thread::spawn(check_now);
+    std::thread::spawn(|| check_now(true));
 }
 
 /// Asks for the browser to start again once it has closed, to install the update.

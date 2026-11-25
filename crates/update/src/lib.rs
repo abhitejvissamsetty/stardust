@@ -8,6 +8,11 @@
 //!
 //! A new version is downloaded and unpacked into a staging folder while the browser
 //! runs, then swapped in at the next start, before Chromium loads.
+//!
+//! Releases can go out step by step: a manifest's `rollout` is the percentage of
+//! installs that take it on their own. Each install keeps a random group from 0 to 99,
+//! and takes a release when its group is below the rollout. Someone who asks for
+//! updates gets the newest release whatever the rollout.
 
 use std::fs;
 use std::io::{Read, Write};
@@ -19,8 +24,9 @@ use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-/// The public half of the key that signs releases.
-const RELEASE_KEY: &str = include_str!("../release-key.pub");
+/// The public halves of the keys that sign releases, one a line. A manifest signed by
+/// any of them is believed, so a release can trust a new key before the old one stops.
+const RELEASE_KEYS: &str = include_str!("../release-key.pub");
 /// Larger downloads are refused, so a bad manifest can't fill the disk.
 const MAX_PACKAGE_BYTES: u64 = 1024 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 64 * 1024;
@@ -59,8 +65,19 @@ pub type Result<T> = std::result::Result<T, Error>;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Manifest {
     pub version: String,
+    /// The percentage of installs that take this release on their own, 1 to 100.
+    #[serde(default = "everyone", skip_serializing_if = "is_everyone")]
+    pub rollout: u8,
     /// Packages by platform, such as `macos-aarch64`.
     pub packages: std::collections::BTreeMap<String, Package>,
+}
+
+fn everyone() -> u8 {
+    100
+}
+
+fn is_everyone(rollout: &u8) -> bool {
+    *rollout >= 100
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -96,33 +113,56 @@ pub fn is_newer(a: &str, b: &str) -> bool {
     }
 }
 
-fn release_key() -> Result<VerifyingKey> {
-    let bytes = BASE64
-        .decode(RELEASE_KEY.trim())
-        .map_err(|_| Error::BadSignature)?;
-    let bytes: [u8; 32] = bytes.try_into().map_err(|_| Error::BadSignature)?;
-    VerifyingKey::from_bytes(&bytes).map_err(|_| Error::BadSignature)
+/// Reads public keys written one a line, as in `release-key.pub`.
+pub fn parse_keys(text: &str) -> Result<Vec<VerifyingKey>> {
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(|line| {
+            let bytes = BASE64.decode(line).map_err(|_| Error::BadSignature)?;
+            let bytes: [u8; 32] = bytes.try_into().map_err(|_| Error::BadSignature)?;
+            VerifyingKey::from_bytes(&bytes).map_err(|_| Error::BadSignature)
+        })
+        .collect()
 }
 
-/// Checks a manifest's signature and reads it.
-pub fn verify_manifest(manifest: &[u8], signature: &str, key: &VerifyingKey) -> Result<Manifest> {
+/// Checks a manifest is signed by one of `keys`, and reads it.
+pub fn verify_manifest(
+    manifest: &[u8],
+    signature: &str,
+    keys: &[VerifyingKey],
+) -> Result<Manifest> {
     let signature = BASE64
         .decode(signature.trim())
         .map_err(|_| Error::BadSignature)?;
     let signature = Signature::from_slice(&signature).map_err(|_| Error::BadSignature)?;
-    key.verify(manifest, &signature)
-        .map_err(|_| Error::BadSignature)?;
-    serde_json::from_slice(manifest).map_err(|error| Error::BadManifest(error.to_string()))
+    if !keys
+        .iter()
+        .any(|key| key.verify(manifest, &signature).is_ok())
+    {
+        return Err(Error::BadSignature);
+    }
+    let manifest: Manifest =
+        serde_json::from_slice(manifest).map_err(|error| Error::BadManifest(error.to_string()))?;
+    if !(1..=100).contains(&manifest.rollout) {
+        return Err(Error::BadManifest("invalid rollout".into()));
+    }
+    Ok(manifest)
 }
 
-/// The release in a manifest worth installing over `current`, if any.
+/// The release in a manifest worth installing over `current`, if any. `group` is this
+/// install's rollout group, or `None` when the person asked for updates.
 pub fn newer_release(
     manifest: &Manifest,
     current: &str,
     platform: &str,
     manifest_url: &str,
+    group: Option<u8>,
 ) -> Result<Option<Release>> {
     if !is_newer(&manifest.version, current) {
+        return Ok(None);
+    }
+    if group.is_some_and(|group| group >= manifest.rollout) {
         return Ok(None);
     }
     let Some(package) = manifest.packages.get(platform) else {
@@ -191,13 +231,13 @@ fn fetch(url: &str, limit: u64) -> Result<Vec<u8>> {
 }
 
 /// Asks the server for a newer version. `manifest_url` is the full address of
-/// `manifest.json`.
-pub fn check(manifest_url: &str, current: &str) -> Result<Option<Release>> {
+/// `manifest.json`, and `group` is as for [`newer_release`].
+pub fn check(manifest_url: &str, current: &str, group: Option<u8>) -> Result<Option<Release>> {
     let manifest = fetch(manifest_url, MAX_MANIFEST_BYTES)?;
     let signature = fetch(&format!("{manifest_url}.sig"), 1024)?;
     let signature = String::from_utf8(signature).map_err(|_| Error::BadSignature)?;
-    let manifest = verify_manifest(&manifest, &signature, &release_key()?)?;
-    newer_release(&manifest, current, &platform(), manifest_url)
+    let manifest = verify_manifest(&manifest, &signature, &parse_keys(RELEASE_KEYS)?)?;
+    newer_release(&manifest, current, &platform(), manifest_url, group)
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
@@ -364,6 +404,7 @@ mod tests {
         );
         Manifest {
             version: "0.2.0".into(),
+            rollout: 100,
             packages,
         }
     }
@@ -386,7 +427,7 @@ mod tests {
     #[test]
     fn accepts_a_correctly_signed_manifest() {
         let (bytes, signature) = signed(&manifest());
-        let read = verify_manifest(&bytes, &signature, &key().verifying_key()).unwrap();
+        let read = verify_manifest(&bytes, &signature, &[key().verifying_key()]).unwrap();
         assert_eq!(read, manifest());
     }
 
@@ -396,7 +437,7 @@ mod tests {
         let at = bytes.iter().position(|b| *b == b'2').unwrap();
         bytes[at] = b'9';
         assert!(matches!(
-            verify_manifest(&bytes, &signature, &key().verifying_key()),
+            verify_manifest(&bytes, &signature, &[key().verifying_key()]),
             Err(Error::BadSignature)
         ));
     }
@@ -405,13 +446,65 @@ mod tests {
     fn refuses_another_key() {
         let (bytes, signature) = signed(&manifest());
         let other = SigningKey::from_bytes(&[8; 32]).verifying_key();
-        assert!(verify_manifest(&bytes, &signature, &other).is_err());
+        assert!(verify_manifest(&bytes, &signature, &[other]).is_err());
+        // Trusted alongside the right key, another key doesn't get in the way.
+        assert!(verify_manifest(&bytes, &signature, &[other, key().verifying_key()]).is_ok());
+    }
+
+    #[test]
+    fn reads_the_built_in_keys() {
+        assert!(!parse_keys(RELEASE_KEYS).unwrap().is_empty());
+        let two = format!(
+            "# old\n{}\n\n{}\n",
+            BASE64.encode([1; 32]),
+            BASE64.encode(key().verifying_key().to_bytes())
+        );
+        assert_eq!(parse_keys(&two).unwrap().len(), 2);
+        assert!(parse_keys("not a key").is_err());
+    }
+
+    #[test]
+    fn manifests_without_a_rollout_go_to_everyone() {
+        let json = r#"{"version":"0.2.0","packages":{}}"#;
+        let read: Manifest = serde_json::from_str(json).unwrap();
+        assert_eq!(read.rollout, 100);
+        // And a full rollout is left out, so older manifests read the same.
+        assert!(!serde_json::to_string(&read).unwrap().contains("rollout"));
+    }
+
+    #[test]
+    fn refuses_a_rollout_out_of_range() {
+        let mut zero = manifest();
+        zero.rollout = 0;
+        let (bytes, signature) = signed(&zero);
+        assert!(matches!(
+            verify_manifest(&bytes, &signature, &[key().verifying_key()]),
+            Err(Error::BadManifest(_))
+        ));
+    }
+
+    #[test]
+    fn a_partial_rollout_reaches_only_its_groups() {
+        let url = "https://updates.example/stardust/manifest.json";
+        let mut quarter = manifest();
+        quarter.rollout = 25;
+        let offered = |group| {
+            newer_release(&quarter, "0.1.0", "macos-aarch64", url, group)
+                .unwrap()
+                .is_some()
+        };
+        assert!(offered(Some(0)));
+        assert!(offered(Some(24)));
+        assert!(!offered(Some(25)));
+        assert!(!offered(Some(99)));
+        // Asking for updates gets it anyway.
+        assert!(offered(None));
     }
 
     #[test]
     fn only_offers_newer_versions_for_this_platform() {
         let url = "https://updates.example/stardust/manifest.json";
-        let release = newer_release(&manifest(), "0.1.0", "macos-aarch64", url)
+        let release = newer_release(&manifest(), "0.1.0", "macos-aarch64", url, Some(99))
             .unwrap()
             .unwrap();
         assert_eq!(
@@ -419,11 +512,11 @@ mod tests {
             "https://updates.example/stardust/stardust-0.2.0.tar.gz"
         );
         assert_eq!(
-            newer_release(&manifest(), "0.2.0", "macos-aarch64", url).unwrap(),
+            newer_release(&manifest(), "0.2.0", "macos-aarch64", url, None).unwrap(),
             None
         );
         assert_eq!(
-            newer_release(&manifest(), "0.1.0", "linux-x86_64", url).unwrap(),
+            newer_release(&manifest(), "0.1.0", "linux-x86_64", url, None).unwrap(),
             None
         );
     }
@@ -438,7 +531,16 @@ mod tests {
         assert!(!is_allowed_url("file:///etc/passwd"));
         let mut manifest = manifest();
         manifest.packages.get_mut("macos-aarch64").unwrap().url = "http://a.example/x".into();
-        assert!(newer_release(&manifest, "0.1.0", "macos-aarch64", "https://b.example/m").is_err());
+        assert!(
+            newer_release(
+                &manifest,
+                "0.1.0",
+                "macos-aarch64",
+                "https://b.example/m",
+                None
+            )
+            .is_err()
+        );
     }
 
     fn package(files: &[(&str, &[u8])]) -> Vec<u8> {
