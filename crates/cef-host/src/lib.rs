@@ -9,6 +9,7 @@ mod mac;
 mod menubar;
 mod passwords;
 mod render;
+mod secret_store;
 mod ui;
 mod updates;
 

@@ -98,7 +98,7 @@ struct TabHandles {
     view: BrowserView,
     browser: Option<Browser>,
     /// An error page to show once the failed load finishes.
-    pending_error: Option<String>,
+    pending_error: Option<bridge::ErrorPage>,
     /// The URL of the page on screen. `page.url` can be ahead of it during a load.
     committed_url: String,
     /// Whether the tab is showing an error page, whose title shouldn't reach history.
@@ -1511,6 +1511,10 @@ fn offer_to_save_login(shell: &SharedShell, tab: TabId, url: &str, json: &str) {
     if with_storage(|storage| storage.never_saves_logins(&origin)).unwrap_or(true) {
         return;
     }
+    // Nowhere to keep it.
+    if !crate::secret_store::available() {
+        return;
+    }
     let saved = passwords::get(&origin, &login.username);
     if saved.as_deref() == Some(login.password.as_str()) {
         with_storage(|storage| storage.save_login(&origin, &login.username, now_ms()));
@@ -2302,6 +2306,7 @@ fn run_command(shell: &SharedShell, command: UiCommand) {
             publish_layout(shell);
             publish_side_panel_state(shell);
             send_known_favicons(shell);
+            tell_about_password_store(shell);
             // A new window's first tab was shown before its toolbar could take focus.
             let is_blank = lock(shell)
                 .strip
@@ -4349,6 +4354,7 @@ wrap_display_handler! {
             let has_logins = has_saved_logins(&workspace_of(&self.shell), &url);
             update_tab(&self.shell, self.id, |tab| {
                 tab.page.url = url;
+                tab.page.certificate_error = false;
                 tab.page.is_bookmarked = is_bookmarked;
                 tab.page.has_logins = has_logins;
                 if let Some(history) = own_list {
@@ -4551,11 +4557,14 @@ wrap_load_handler! {
             let error_text = error_text.map(CefString::to_string).unwrap_or_default();
             // No address change arrives for a failed load, so show the URL that failed.
             if let Some(handles) = lock(&self.shell).handles.get_mut(&self.id) {
-                handles.pending_error = Some(error_page(&failed_url, &error_text));
+                handles.pending_error = Some(error_page(&failed_url, &error_text, error_code));
                 handles.committed_url = failed_url.clone();
                 handles.showing_error = true;
             }
-            update_tab(&self.shell, self.id, |tab| tab.page.url = failed_url);
+            update_tab(&self.shell, self.id, |tab| {
+                tab.page.url = failed_url;
+                tab.page.certificate_error = bridge::is_certificate_error(error_code);
+            });
         }
 
         // Filling in the failed load's own document, rather than navigating to an error
@@ -4604,11 +4613,35 @@ wrap_load_handler! {
                 }
                 return;
             };
-            let page = serde_json::to_string(&page).expect("Failed to serialize error page");
-            let code = format!("document.open();document.write({page});document.close();");
-            frame.execute_java_script(Some(&CefString::from(code.as_str())), None, 0);
+            write_error_page(frame, &page);
         }
     }
+}
+
+/// Replaces the frame's document with an error page. It's built from elements and
+/// text rather than written as HTML, because Chromium's own document for a certificate
+/// error refuses HTML through Trusted Types.
+fn write_error_page(frame: &Frame, page: &bridge::ErrorPage) {
+    let page = serde_json::to_string(page).expect("Failed to serialize error page");
+    let code = format!(
+        r#"{{
+const page = {page};
+const make = (tag, text) => {{ const element = document.createElement(tag); element.textContent = text; return element; }};
+const root = document.documentElement || document.appendChild(document.createElement("html"));
+root.replaceChildren();
+root.lang = "en";
+const head = document.createElement("head");
+head.append(make("title", page.heading), make("style", page.style));
+const main = document.createElement("main");
+main.append(make("h1", page.heading), ...page.paragraphs.map((text) => make("p", text)));
+main.append(document.createElement("p"));
+main.lastChild.append(make("code", page.error));
+const body = document.createElement("body");
+body.append(main);
+root.append(head, body);
+}}"#
+    );
+    frame.execute_java_script(Some(&CefString::from(code.as_str())), None, 0);
 }
 
 wrap_audio_handler! {
@@ -5325,6 +5358,18 @@ fn add_current_page_snippet(shell: &SharedShell) {
         save_panel_data();
         publish_panel_everywhere();
     }
+}
+
+/// Says once, in the first window, that the system's password store didn't answer.
+fn tell_about_password_store(shell: &SharedShell) {
+    static TOLD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if crate::secret_store::available() || TOLD.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
+    toast(
+        shell,
+        "Keyring locked, so passwords can't be saved. Unlock it and restart Stardust",
+    );
 }
 
 /// Shows a short message in the toolbar.

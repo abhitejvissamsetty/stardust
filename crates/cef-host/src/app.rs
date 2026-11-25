@@ -68,6 +68,18 @@ wrap_app! {
                 command_line.append_switch_with_value(Some(&profile), Some(&CefString::from("srgb")));
             }
 
+            // Without an answer from the password store, Chromium would wait for it forever.
+            // It's asked here, before any window, so saved passwords never wait on it later.
+            let store = CefString::from("password-store");
+            let desktop = std::env::var("XDG_CURRENT_DESKTOP").ok();
+            if cfg!(target_os = "linux")
+                && !crate::secret_store::available()
+                && command_line.has_switch(Some(&store)) == 0
+                && !crate::secret_store::uses_kwallet(desktop.as_deref())
+            {
+                command_line.append_switch_with_value(Some(&store), Some(&CefString::from("basic")));
+            }
+
             if cfg!(target_os = "linux") {
                 let drivers = std::env::var("LIBVA_DRIVERS_PATH").ok();
                 if bridge::has_vaapi_driver(&bridge::vaapi_driver_folders(drivers.as_deref())) {

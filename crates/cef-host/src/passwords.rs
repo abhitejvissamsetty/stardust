@@ -2,6 +2,9 @@
 //! Credential Manager on Windows and the Secret Service on Linux. Stardust's own
 //! database only knows each login's site and username.
 //!
+//! When the store doesn't answer, as `secret_store` checks, nothing is saved and the
+//! store isn't asked again, since asking could wait forever.
+//!
 //! With `--use-mock-keychain`, as tests run, passwords stay in memory instead, so a
 //! test never touches the person's real store.
 
@@ -35,6 +38,9 @@ pub fn save(origin: &str, username: &str, password: &str) -> Result<(), String> 
         memory().insert(account, password.to_owned());
         return Ok(());
     }
+    if !crate::secret_store::available() {
+        return Err("The system's password store isn't available".into());
+    }
     keyring::Entry::new(SERVICE, &account)
         .and_then(|entry| entry.set_password(password))
         .map_err(|error| error.to_string())
@@ -45,6 +51,9 @@ pub fn get(origin: &str, username: &str) -> Option<String> {
     if uses_memory() {
         return memory().get(&account).cloned();
     }
+    if !crate::secret_store::available() {
+        return None;
+    }
     keyring::Entry::new(SERVICE, &account)
         .and_then(|entry| entry.get_password())
         .ok()
@@ -54,6 +63,9 @@ pub fn delete(origin: &str, username: &str) {
     let account = account(origin, username);
     if uses_memory() {
         memory().remove(&account);
+        return;
+    }
+    if !crate::secret_store::available() {
         return;
     }
     if let Ok(entry) = keyring::Entry::new(SERVICE, &account) {

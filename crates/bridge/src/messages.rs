@@ -359,6 +359,8 @@ pub struct BrowserState {
     pub has_logins: bool,
     /// How far the page is zoomed. Nothing sent yet means 100.
     pub zoom_percent: i32,
+    /// The page was stopped because its site's certificate isn't valid.
+    pub certificate_error: bool,
 }
 
 #[cfg(test)]

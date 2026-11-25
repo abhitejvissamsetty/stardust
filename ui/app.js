@@ -743,7 +743,8 @@ address.addEventListener("keydown", (event) => {
 
 function renderSiteInfo(tab) {
   const info = byId("site-info");
-  const secure = tab.url.startsWith("https://");
+  const badCertificate = tab.certificateError === true;
+  const secure = tab.url.startsWith("https://") && !badCertificate;
   let host = "";
   try {
     host = new URL(tab.url).hostname;
@@ -752,13 +753,19 @@ function renderSiteInfo(tab) {
   }
   // Plain HTTP to this computer is for developing sites, so it isn't a warning.
   const local = host === "localhost" || host === "127.0.0.1" || host.endsWith(".localhost");
-  const insecure = tab.url.startsWith("http://") && !local;
+  const insecure = (tab.url.startsWith("http://") && !local) || badCertificate;
   info.hidden = !secure && !insecure;
   info.classList.toggle("warning", insecure);
   byId("lock-icon").toggleAttribute("hidden", !secure);
   byId("warn-icon").toggleAttribute("hidden", !insecure);
   byId("site-info-label").textContent = insecure ? "Not secure" : "";
-  info.title = secure ? "Connection is secure" : insecure ? "This page isn't encrypted, so others on the network could see it" : "";
+  info.title = secure
+    ? "Connection is secure"
+    : badCertificate
+      ? "This site's certificate isn't valid, so the page wasn't loaded"
+      : insecure
+        ? "This page isn't encrypted, so others on the network could see it"
+        : "";
 }
 
 // A short message beside the address bar, such as "Clipped".
@@ -766,9 +773,11 @@ let toastTimer = null;
 function showToast(text) {
   const toast = byId("toast");
   toast.textContent = text;
+  toast.title = text;
   toast.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (toast.hidden = true), 2200);
+  // Longer messages stay long enough to read.
+  toastTimer = setTimeout(() => (toast.hidden = true), Math.max(2200, text.length * 70));
 }
 
 // -- Command bar --------------------------------------------------------------------------

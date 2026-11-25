@@ -27,7 +27,7 @@ pub use discard::{
     DISCARD_CHECK_MS, DISCARD_IDLE_MS, DISCARD_LOADED_LIMIT, LoadedTab, tabs_to_discard,
 };
 pub use downloads::{Download, DownloadList, DownloadState, safe_file_name, unique_path};
-pub use error_page::error_page;
+pub use error_page::{ErrorPage, error_page, is_certificate_error};
 pub use history::{TabHistory, is_risky_file};
 pub use inspect::INSPECT_SCRIPT;
 pub use library::{

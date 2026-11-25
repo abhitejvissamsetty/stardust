@@ -404,6 +404,7 @@ dependencies = [
  "base64 0.22.1",
  "bridge",
  "cef",
+ "dbus-secret-service",
  "directories",
  "extensions",
  "import",

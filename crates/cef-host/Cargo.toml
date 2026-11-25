@@ -23,6 +23,9 @@ base64 = "0.22"
 directories = "6"
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+dbus-secret-service = "4"
+
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6.3"
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSApplication", "NSEvent", "NSResponder"] }
