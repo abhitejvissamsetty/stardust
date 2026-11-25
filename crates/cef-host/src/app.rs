@@ -111,9 +111,12 @@ wrap_browser_process_handler! {
             );
 
             // The very first time, the welcome page opens in place of the home page. An
-            // address given on the command line is still opened, after it.
+            // address given on the command line is still opened, after it. As in Chrome,
+            // `--no-first-run` skips it, as tests and measurements do.
             let mut requested = requested;
-            if take_first_run() {
+            let skips_first_run =
+                command_line.has_switch(Some(&CefString::from("no-first-run"))) != 0;
+            if !skips_first_run && take_first_run() {
                 requested.insert(0, welcome_url().to_owned());
             }
             let windows = startup_windows();

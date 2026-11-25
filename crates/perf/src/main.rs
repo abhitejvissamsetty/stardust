@@ -122,6 +122,9 @@ impl Running {
         std::fs::create_dir_all(&profile).expect("Failed to create a temporary profile");
         let mut command = Command::new(binary);
         command.args(args);
+        // The welcome page's animation isn't what's being measured. Chrome takes
+        // the same switch.
+        command.arg("--no-first-run");
         // With `HOME` moved, macOS has no keychain to store the cookie key in, and
         // shows a dialog that holds up loading. A stand-in keychain avoids it.
         if cfg!(target_os = "macos") {
