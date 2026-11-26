@@ -191,6 +191,40 @@ fn sha256_hex(bytes: &[u8]) -> String {
         .collect()
 }
 
+/// Makes the Linux installer: the installer program with `dist/` appended, and a
+/// trailer saying where it is (see `crates/installer/src/payload.rs`).
+pub fn installer(out: &Path) {
+    if !cfg!(target_os = "linux") {
+        eprintln!("The installer is for Linux, and is made on Linux.");
+        std::process::exit(1);
+    }
+    let status = std::process::Command::new(env!("CARGO"))
+        .args(["build", "--release", "-p", "installer"])
+        .status()
+        .expect("failed to run cargo");
+    assert!(status.success(), "failed to build the installer");
+    let program =
+        fs::read("target/release/stardust-installer").expect("failed to read the installer");
+    let package = package(Path::new("dist"));
+    let offset = program.len() as u64;
+    let mut file = program;
+    file.extend(&package);
+    file.extend(b"STARDUST");
+    file.extend(offset.to_le_bytes());
+    file.extend((package.len() as u64).to_le_bytes());
+    fs::create_dir_all(out).expect("failed to create the output folder");
+    let version = env!("CARGO_PKG_VERSION");
+    let path = out.join(format!(
+        "stardust-{version}-{}-installer.run",
+        update::platform()
+    ));
+    fs::write(&path, file).expect("failed to write the installer");
+    #[cfg(unix)]
+    fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+        .expect("failed to make the installer runnable");
+    println!("Installer: {}", path.display());
+}
+
 /// A gzipped tar of the bundle, with one top-level item named like the install folder.
 fn package(dist: &Path) -> Vec<u8> {
     let encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());

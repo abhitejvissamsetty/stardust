@@ -1,0 +1,16 @@
+[package]
+name = "installer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "stardust-installer"
+path = "src/main.rs"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+eframe = { version = "0.37", default-features = false, features = ["glow", "x11", "wayland", "default_fonts"] }
+flate2 = "1"
+png = "0.18"
+tar = "0.4"

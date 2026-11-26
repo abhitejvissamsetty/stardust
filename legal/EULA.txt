@@ -1,0 +1,100 @@
+STARDUST END USER LICENCE AGREEMENT
+Version 1.0, 26 November 2026
+
+This agreement is between you and Ambiqa Innovations ("Ambiqa", "we", "us"). It covers the official Stardust web browser that Ambiqa builds and distributes, including its installer, its updates, and the Stardust name and branding (together, "Stardust"). By installing or using Stardust you accept this agreement. If you don't accept it, don't install or use Stardust.
+
+1. OPEN-SOURCE LICENCES COME FIRST
+
+1.1 Stardust's source code is licensed under the Mozilla Public License 2.0. Stardust is built on Chromium and the Chromium Embedded Framework, and includes other components, each under its own licence. Those licences and notices are installed with Stardust in the file CREDITS.html.
+
+1.2 Nothing in this agreement limits any right you have under those licences. Where this agreement and one of those licences disagree about the code it covers, that licence governs that code. This agreement governs everything else: the official builds as Ambiqa distributes them, the Stardust name and branding, and Ambiqa's services such as updates.
+
+2. YOUR LICENCE TO USE STARDUST
+
+2.1 Ambiqa grants you a worldwide, non-exclusive, royalty-free licence to install and use the official Stardust builds, for personal or commercial purposes, on any number of devices you own or control.
+
+2.2 Ambiqa keeps all rights not expressly granted in this agreement.
+
+3. NAMES, LOGOS AND BRANDING
+
+3.1 "Stardust", "Ambiqa", the Stardust star-and-orb logo, and Stardust's visual design are trademarks and property of Ambiqa. This agreement and the open-source licences give you no right to use them, except to refer truthfully to Stardust.
+
+3.2 If you modify Stardust or distribute your own builds, you must not call them Stardust, use the Stardust logo, or suggest that Ambiqa makes, endorses or supports them, without Ambiqa's written permission.
+
+4. UPDATES
+
+4.1 Stardust checks for, downloads and installs updates automatically, including security fixes. By accepting this agreement you consent to this. Updates are signed by Ambiqa, and Stardust installs only updates carrying a valid Ambiqa signature.
+
+4.2 Ambiqa may release updates gradually, change or remove features, or stop providing updates for a version, at any time and without notice. Ambiqa recommends always using the latest version, and gives no support for older ones.
+
+4.3 Updates are covered by this agreement, as it stands when they are installed.
+
+5. PRIVACY
+
+5.1 Ambiqa does not collect your browsing history, the pages you visit, your searches, your passwords or the contents of your workspaces. They stay on your device, or with the websites and services you choose to use.
+
+5.2 When Stardust checks for updates, it contacts Ambiqa's update server, which receives what any web server receives: your network address, and which files are requested. Ambiqa uses this only to provide updates and keep the service secure.
+
+5.3 Websites you visit, the search engine you choose, and extensions you install have their own terms and privacy policies, which Ambiqa does not control.
+
+6. YOUR RESPONSIBILITIES
+
+6.1 You will use Stardust lawfully, and you are responsible for what you do with it, including the websites you visit, the content you access or download, the extensions you install, and the accounts you sign in to.
+
+6.2 You will not use Stardust, or anything Ambiqa provides with it, to attack, overload or interfere with Ambiqa's services or anyone else's systems.
+
+6.3 You are responsible for keeping backups of your data. Ambiqa is not responsible for lost bookmarks, passwords, history or other data.
+
+7. THIRD-PARTY WEBSITES, CONTENT AND SERVICES
+
+Stardust gives access to websites, content, search engines, extensions and services that Ambiqa does not own or control. Ambiqa is not responsible for them, does not endorse them, and is not liable for any loss arising from your use of them.
+
+8. NO WARRANTY
+
+8.1 STARDUST IS PROVIDED "AS IS" AND "AS AVAILABLE", WITH ALL FAULTS AND WITHOUT WARRANTY OF ANY KIND. TO THE FULLEST EXTENT THE LAW ALLOWS, AMBIQA DISCLAIMS ALL WARRANTIES, CONDITIONS AND GUARANTEES, WHETHER EXPRESS, IMPLIED OR STATUTORY, INCLUDING ANY OF MERCHANTABILITY, SATISFACTORY QUALITY, FITNESS FOR A PARTICULAR PURPOSE, ACCURACY, SECURITY AND NON-INFRINGEMENT.
+
+8.2 Ambiqa does not warrant that Stardust will be uninterrupted, error-free or secure, that it will protect you from every harmful website or file, that it will work with every website or device, or that defects will be fixed.
+
+8.3 Stardust is not designed for use where its failure could lead to death, injury, or serious physical or environmental damage, and you must not use it for that.
+
+9. LIMITATION OF LIABILITY
+
+9.1 TO THE FULLEST EXTENT THE LAW ALLOWS, AMBIQA, ITS DIRECTORS, EMPLOYEES, CONTRIBUTORS AND SUPPLIERS WILL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, EXEMPLARY OR PUNITIVE DAMAGES, OR FOR ANY LOSS OF PROFITS, REVENUE, DATA, GOODWILL OR BUSINESS OPPORTUNITY, ARISING OUT OF OR RELATING TO STARDUST OR THIS AGREEMENT, HOWEVER CAUSED AND EVEN IF ADVISED OF THEIR POSSIBILITY.
+
+9.2 TO THE FULLEST EXTENT THE LAW ALLOWS, AMBIQA'S TOTAL LIABILITY FOR ALL CLAIMS ARISING OUT OF OR RELATING TO STARDUST OR THIS AGREEMENT WILL NOT EXCEED THE GREATER OF (A) THE AMOUNT YOU PAID AMBIQA FOR STARDUST IN THE TWELVE MONTHS BEFORE THE CLAIM AND (B) ONE THOUSAND INDIAN RUPEES (INR 1,000).
+
+9.3 Some laws do not allow these exclusions or limits, in which case they apply only as far as those laws allow. Nothing in this agreement excludes liability that cannot be excluded by law.
+
+10. INDEMNITY
+
+To the fullest extent the law allows, you will indemnify and hold harmless Ambiqa, its directors, employees and contributors from any claim, loss, liability or expense, including reasonable legal fees, arising from your breach of this agreement, your misuse of Stardust, or your violation of any law or anyone else's rights.
+
+11. ENDING THIS AGREEMENT
+
+11.1 This agreement lasts until it ends. You may end it at any time by uninstalling Stardust and deleting all copies of it.
+
+11.2 Your rights under this agreement end automatically if you breach it. Ambiqa may also end them, or stop providing updates or services to you, if required by law or to protect Ambiqa's services or users.
+
+11.3 When this agreement ends you must stop using the official Stardust builds. Rights you have under the open-source licences in section 1 are not affected. Sections 3, 5 to 10, 12 and 13 survive the end of this agreement.
+
+12. CHANGES TO THIS AGREEMENT
+
+Ambiqa may change this agreement from time to time. A changed agreement is shown in Stardust's installer, published with Stardust, or delivered with an update. If you keep using Stardust after a change takes effect, you accept the changed agreement. If you don't accept it, stop using Stardust and uninstall it.
+
+13. GENERAL
+
+13.1 Governing law and courts. This agreement, and any dispute or claim arising out of or relating to it or to Stardust, is governed by the laws of India, without regard to conflict-of-laws rules. The competent courts in India have exclusive jurisdiction over any such dispute, and you consent to their jurisdiction.
+
+13.2 Export and sanctions. You will comply with all export control and sanctions laws that apply to your use of Stardust, and you confirm that you are not barred from receiving software under them.
+
+13.3 Entire agreement. This agreement, together with the open-source licences in section 1, is the entire agreement between you and Ambiqa about Stardust, and replaces any earlier understanding.
+
+13.4 Severability. If any part of this agreement is found unenforceable, it is limited to the least extent necessary, and the rest stays in force.
+
+13.5 No waiver. If Ambiqa does not enforce a part of this agreement, that is not a waiver of its right to enforce it later.
+
+13.6 Assignment. You may not transfer this agreement or your rights under it without Ambiqa's written consent. Ambiqa may transfer this agreement, for example as part of a merger, acquisition or sale of assets.
+
+13.7 Notices. Ambiqa may give you notices through Stardust, its installer, or its updates. Send notices to Ambiqa by email to legal@ambiqa.in.
+
+Contact: Ambiqa Innovations, legal@ambiqa.in

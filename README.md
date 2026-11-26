@@ -33,4 +33,4 @@ cargo xtask bundle --release
 
 ## License
 
-[MPL-2.0](LICENSE). CEF and Chromium have their own licenses, listed in `CREDITS.html` in the bundle.
+[MPL-2.0](LICENSE). CEF and Chromium have their own licenses, listed in `CREDITS.html` in the bundle. The official builds Ambiqa distributes, and the Stardust name and logo, are covered by the [End User Licence Agreement](legal/EULA.txt), which the installer asks people to accept. It defers to the open-source licences for the code they cover.

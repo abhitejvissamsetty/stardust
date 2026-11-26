@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/bridge", "crates/cef-host", "crates/import", "crates/perf", "crates/shell", "crates/storage", "crates/update", "crates/extensions", "xtask"]
+members = ["crates/bridge", "crates/cef-host", "crates/import", "crates/perf", "crates/shell", "crates/storage", "crates/update", "crates/extensions", "crates/installer", "xtask"]
 
 [workspace.package]
 version = "0.1.0"

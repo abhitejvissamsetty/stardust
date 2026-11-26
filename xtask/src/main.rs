@@ -6,6 +6,8 @@
 //!   public half in `crates/update/release-key.pub`.
 //! - `cargo xtask package --out <folder>` packages `dist/` for this platform, with a
 //!   `.package.json` describing it. It needs no key, so build servers run it.
+//! - `cargo xtask installer [--out <folder>]` makes the Linux installer, one `.run`
+//!   file carrying `dist/`, in `releases/` unless told otherwise.
 //! - `cargo xtask sign --key <private key file> --dir <folder> [--rollout <percent>]`
 //!   gathers the folder's `.package.json` files into `manifest.json` and signs it. See
 //!   `docs/releasing.md`.
@@ -39,6 +41,9 @@ fn main() {
             Some(out) => release::package_release(&out),
             None => usage(),
         },
+        Some("installer") => {
+            release::installer(&value("--out").unwrap_or_else(|| PathBuf::from("releases")))
+        }
         Some("sign") => {
             let rollout = match value("--rollout") {
                 Some(text) => text.to_string_lossy().parse().unwrap_or(0),
@@ -55,7 +60,7 @@ fn main() {
 
 fn usage() {
     eprintln!(
-        "usage:\n  cargo xtask bundle [--release]\n  cargo xtask keygen <private key file>\n  cargo xtask package --out <folder>\n  cargo xtask sign --key <private key file> --dir <folder> [--rollout <percent>]"
+        "usage:\n  cargo xtask bundle [--release]\n  cargo xtask keygen <private key file>\n  cargo xtask package --out <folder>\n  cargo xtask installer [--out <folder>]\n  cargo xtask sign --key <private key file> --dir <folder> [--rollout <percent>]"
     );
     std::process::exit(2);
 }

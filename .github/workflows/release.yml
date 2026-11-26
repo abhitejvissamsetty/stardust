@@ -48,6 +48,10 @@ jobs:
           fi
       - run: cargo xtask bundle --release
       - run: cargo xtask package --out release
+      # The graphical installer people download, with the licence agreement.
+      - name: Make the Linux installer
+        if: runner.os == 'Linux'
+        run: cargo xtask installer --out release
       - uses: actions/upload-artifact@v4
         with:
           name: release-${{ runner.os }}

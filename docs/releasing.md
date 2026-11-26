@@ -19,6 +19,28 @@ A manifest's `rollout` is the percentage of installs that take the release on th
 
 A typical release goes 5%, then 25% a day or two later if nothing breaks, then 100%.
 
+## The Linux installer
+
+People download `stardust-<version>-linux-x86_64-installer.run`, which the release workflow attaches to each draft. To make one locally from `dist/`:
+
+```bash
+cargo xtask installer
+```
+
+It's one file: the installer program from [`crates/installer`](../crates/installer), with the browser appended. Opening it shows a window in the welcome page's look that goes through five steps:
+
+1. **Welcome.**
+2. **The licence agreement:** [`legal/EULA.txt`](../legal/EULA.txt). It has to be accepted to continue, and the acceptance is recorded in `.agreement-accepted` in the install folder.
+3. **Where to install:** `~/.local/opt/stardust` by default, a folder the person owns, so updates can replace it.
+4. **Installing**, with a progress bar.
+5. **Done**, with an option to open Stardust.
+
+It adds a menu entry, icons, the `stardust` command and an `uninstall` script, and needs no administrator. On systems that restrict user namespaces, as Ubuntu does from 23.10, it offers to add an AppArmor rule so Chromium's sandbox can start. That one step asks for a password.
+
+**Changing the agreement:**
+- **Version:** raise `AGREEMENT_VERSION` in `crates/installer/src/install.rs` and the version line in `EULA.txt`.
+- **Review:** have a lawyer review it before the first public release. The governing-law clause names Indian courts in general; name a city there if one is wanted.
+
 ## The signing key
 
 The private key is `~/.stardust-keys/release.key` on the maintainer's computer, made on 2026-11-25. It never goes into the repository, CI or GitHub secrets.
