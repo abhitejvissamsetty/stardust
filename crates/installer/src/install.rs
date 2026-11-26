@@ -43,6 +43,61 @@ pub fn default_dir() -> PathBuf {
     home().join(".local/opt/stardust")
 }
 
+/// The folder someone typed, with a leading `~` meaning their home folder, as in a shell.
+pub fn expand(text: &str) -> PathBuf {
+    let text = text.trim();
+    match text.strip_prefix('~') {
+        Some("") => home(),
+        Some(rest) if rest.starts_with('/') => home().join(rest.trim_start_matches('/')),
+        _ => PathBuf::from(text),
+    }
+}
+
+/// Whether `dir` holds an earlier Stardust: one this installer put there, or a
+/// package unpacked by hand.
+fn is_stardust_install(dir: &Path) -> bool {
+    dir.join(".agreement-accepted").is_file()
+        || (dir.join("stardust").is_file() && dir.join("libcef.so").is_file())
+}
+
+/// Whether Stardust can go in `dir`. Installing replaces the folder, and its old contents
+/// are deleted, so only a new folder, an empty one, or an earlier Stardust will do.
+/// Anything else, such as someone's Documents folder, is refused.
+pub fn check_folder(dir: &Path) -> Result<(), String> {
+    if !dir.is_absolute() {
+        return Err("Type the whole path, starting with / or ~/.".into());
+    }
+    if dir.parent().is_none() || dir == home() {
+        return Err("Choose a folder of its own for Stardust.".into());
+    }
+    if dir
+        .to_str()
+        .is_none_or(|path| path.chars().any(char::is_control))
+    {
+        return Err("The folder's name has characters Stardust can't use.".into());
+    }
+    match fs::symlink_metadata(dir) {
+        Err(_) => Ok(()),
+        Ok(meta) if !meta.is_dir() => Err("That's a file, not a folder.".into()),
+        Ok(_) if is_stardust_install(dir) => Ok(()),
+        Ok(_) if fs::read_dir(dir).is_ok_and(|mut items| items.next().is_none()) => Ok(()),
+        Ok(_) => Err(
+            "That folder already has other files in it. Choose an empty folder or a new one."
+                .into(),
+        ),
+    }
+}
+
+/// Characters that would change the meaning of the AppArmor rule's path: its quotes,
+/// and the patterns AppArmor matches with.
+fn is_safe_for_apparmor(dir: &Path) -> bool {
+    dir.to_str().is_some_and(|path| {
+        !path
+            .chars()
+            .any(|c| c.is_control() || "\"*?[]{}^,#".contains(c))
+    })
+}
+
 /// Whether this system stops Chromium's sandbox from starting without an AppArmor
 /// rule, as Ubuntu does from 23.10.
 pub fn needs_apparmor() -> bool {
@@ -82,6 +137,7 @@ fn install(
     progress: &SharedProgress,
 ) -> Result<Vec<String>, String> {
     let dir = &options.dir;
+    check_folder(dir)?;
     if is_running(dir) {
         return Err("Stardust is open. Close it, then try again.".into());
     }
@@ -294,6 +350,9 @@ pub fn apparmor_rule(dir: &Path) -> String {
 
 /// Adds the AppArmor rule as administrator, asking for a password through `pkexec`.
 fn add_apparmor_rule(dir: &Path) -> Result<(), String> {
+    if !is_safe_for_apparmor(dir) {
+        return Err("the folder's name has characters an AppArmor rule can't hold".into());
+    }
     let mut child = Command::new("pkexec")
         .args([
             "sh",
@@ -449,6 +508,7 @@ mod tests {
         let target = dir.join("stardust");
         fs::create_dir_all(&target).unwrap();
         fs::write(target.join("leftover"), b"old").unwrap();
+        fs::write(target.join(".agreement-accepted"), b"agreement=1.0\n").unwrap();
         let payload = installer_with(&dir, &package(&[("dist/stardust", b"new")]));
         let options = Options {
             dir: target.clone(),
@@ -460,6 +520,24 @@ mod tests {
         assert_eq!(fs::read(target.join("stardust")).unwrap(), b"new");
         assert!(!target.join("leftover").exists());
         assert!(!dir.join(".stardust-old").exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn never_replaces_a_folder_of_someone_elses_files() {
+        let dir = temp("documents");
+        let target = dir.join("Documents");
+        fs::create_dir_all(&target).unwrap();
+        fs::write(target.join("essay.txt"), b"mine").unwrap();
+        let payload = installer_with(&dir, &package(&[("dist/stardust", b"new")]));
+        let options = Options {
+            dir: target.clone(),
+            menu: false,
+            command: false,
+            apparmor: false,
+        };
+        assert!(install(&options, &payload, &SharedProgress::default()).is_err());
+        assert_eq!(fs::read(target.join("essay.txt")).unwrap(), b"mine");
         fs::remove_dir_all(dir).unwrap();
     }
 
@@ -487,6 +565,46 @@ mod tests {
         assert!(install(&options, &payload, &SharedProgress::default()).is_err());
         assert!(!dir.parent().unwrap().join("escape").exists());
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn refuses_folders_that_hold_other_things() {
+        let root = temp("folders");
+        assert!(check_folder(Path::new("relative/stardust")).is_err());
+        assert!(check_folder(Path::new("/")).is_err());
+        assert!(check_folder(&home()).is_err());
+        // A new folder, or an empty one, is fine.
+        assert!(check_folder(&root.join("new")).is_ok());
+        fs::create_dir_all(root.join("empty")).unwrap();
+        assert!(check_folder(&root.join("empty")).is_ok());
+        // Someone's own files are never replaced.
+        fs::create_dir_all(root.join("documents")).unwrap();
+        fs::write(root.join("documents/essay.txt"), b"mine").unwrap();
+        assert!(check_folder(&root.join("documents")).is_err());
+        assert!(check_folder(&root.join("documents/essay.txt")).is_err());
+        // An earlier Stardust is replaced.
+        fs::create_dir_all(root.join("old")).unwrap();
+        fs::write(root.join("old/.agreement-accepted"), b"agreement=1.0\n").unwrap();
+        assert!(check_folder(&root.join("old")).is_ok());
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn expands_the_home_folder() {
+        assert_eq!(expand("~"), home());
+        assert_eq!(expand(" ~/apps/stardust "), home().join("apps/stardust"));
+        assert_eq!(expand("/opt/stardust"), PathBuf::from("/opt/stardust"));
+        assert_eq!(expand("~other/x"), PathBuf::from("~other/x"));
+    }
+
+    #[test]
+    fn keeps_apparmor_patterns_out_of_the_rule() {
+        assert!(is_safe_for_apparmor(Path::new(
+            "/home/a b/.local/opt/stardust"
+        )));
+        for bad in ["/home/a\"b", "/home/*", "/home/a\n}", "/home/{a,b}"] {
+            assert!(!is_safe_for_apparmor(Path::new(bad)), "{bad}");
+        }
     }
 
     #[test]

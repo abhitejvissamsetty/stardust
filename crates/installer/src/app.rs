@@ -232,7 +232,7 @@ impl App {
         let Ok(payload) = self.payload.clone() else {
             return;
         };
-        let dir = PathBuf::from(self.dir.trim());
+        let dir = install::expand(&self.dir);
         install::start(
             Options {
                 dir,
@@ -248,7 +248,7 @@ impl App {
 
     fn finish(&self, ctx: &egui::Context) {
         if self.open_after && matches!(self.result, Some(Ok(_))) {
-            let program = PathBuf::from(self.dir.trim()).join("stardust");
+            let program = install::expand(&self.dir).join("stardust");
             let _ = std::process::Command::new(program)
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
@@ -573,7 +573,7 @@ impl eframe::App for App {
                         }
                     }
                     Step::Location => {
-                        let ready = !self.dir.trim().is_empty() && self.accepted;
+                        let ready = install::check_folder(&install::expand(&self.dir)).is_ok() && self.accepted;
                         if primary(ui, "Install", ready) {
                             self.begin_install();
                         }
@@ -693,8 +693,10 @@ impl App {
             .margin(Margin::symmetric(14, 11))
             .desired_width(f32::INFINITY);
         ui.add(field);
-        let dir = PathBuf::from(self.dir.trim());
-        if install::is_running(&dir) {
+        let dir = install::expand(&self.dir);
+        if let Err(problem) = install::check_folder(&dir) {
+            ui.label(RichText::new(problem).font(font(13.0, "")).color(RED));
+        } else if install::is_running(&dir) {
             ui.label(
                 RichText::new("Stardust is open from this folder. Close it before installing.")
                     .font(font(13.0, ""))
@@ -803,7 +805,7 @@ impl App {
                         ui.label(RichText::new(warning).font(font(13.0, "")).color(AMBER));
                     }
                     ui.add_space(10.0);
-                    let uninstall = PathBuf::from(self.dir.trim()).join("uninstall");
+                    let uninstall = install::expand(&self.dir).join("uninstall");
                     // Shown with ~ for the home folder, as people would type it.
                     let uninstall = match std::env::var_os("HOME") {
                         Some(home) => uninstall.strip_prefix(&home).map_or_else(

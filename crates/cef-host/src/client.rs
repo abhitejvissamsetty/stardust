@@ -1371,7 +1371,7 @@ fn answer_dialog(shell: &SharedShell, reply: Reply, input: &str) {
             site,
             permissions,
         } => {
-            remember_permission(reply, &site, &permissions);
+            remember_permission(shell, reply, &site, &permissions);
             if accepted {
                 callback.cont(requested);
             } else {
@@ -1400,7 +1400,7 @@ fn answer_dialog(shell: &SharedShell, reply: Reply, input: &str) {
             permissions,
             ..
         } => {
-            remember_permission(reply, &site, &permissions);
+            remember_permission(shell, reply, &site, &permissions);
             callback.cont(match reply {
                 Reply::Accept => PermissionRequestResult::ACCEPT,
                 Reply::Decline => PermissionRequestResult::DENY,
@@ -1618,12 +1618,27 @@ fn window_action(shell: &SharedShell, action: WindowAction) {
     publish_window_state(shell);
 }
 
-fn remember_permission(reply: Reply, site: &str, permissions: &[Permission]) {
+/// Choices made in private windows. They stay in memory and go when Stardust closes,
+/// so a private window leaves no record of the sites it was asked by.
+static PRIVATE_PERMISSIONS: std::sync::LazyLock<Mutex<SitePermissions>> =
+    std::sync::LazyLock::new(Mutex::default);
+
+fn private_permissions() -> MutexGuard<'static, SitePermissions> {
+    PRIVATE_PERMISSIONS
+        .lock()
+        .expect("Failed to lock private site permissions")
+}
+
+fn remember_permission(shell: &SharedShell, reply: Reply, site: &str, permissions: &[Permission]) {
     let decision = match reply {
         Reply::Accept => Decision::Allow,
         Reply::Decline => Decision::Block,
         Reply::Dismiss => return,
     };
+    if is_private(shell) {
+        private_permissions().remember(site, permissions, decision);
+        return;
+    }
     site_permissions().remember(site, permissions, decision);
     save_site_permissions();
 }
@@ -1640,7 +1655,13 @@ fn ask_permission(
     let Some(site) = site_origin(requesting_origin) else {
         return Some(false);
     };
-    match site_permissions().answer(&site, &permissions) {
+    let answer = if is_private(shell) {
+        let session = private_permissions().clone();
+        site_permissions().answer_in_private(&session, &site, &permissions)
+    } else {
+        site_permissions().answer(&site, &permissions)
+    };
+    match answer {
         Answer::Allow => return Some(true),
         Answer::Block => return Some(false),
         Answer::Ask(_) => {}

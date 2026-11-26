@@ -1,6 +1,6 @@
 # Custom CEF build
 
-Stock CEF can't play H.264 or AAC. This builds the same CEF that the `cef` crate uses (156.0.14, Chromium 156.0.8078.48) with those formats played by the operating system's decoders, as Firefox does. Stardust ships no H.264 or AAC decoder of its own. Why, and what was considered: [docs/remaining-work.md](../docs/remaining-work.md#7-h264-and-aac-video).
+Stock CEF can't play H.264 or AAC. This builds the same CEF that the `cef` crate uses (158.0.6, Chromium 158.0.8127.89) with those formats played by the operating system's decoders, as Firefox does. Stardust ships no H.264 or AAC decoder of its own. Why, and what was considered: [docs/remaining-work.md](../docs/remaining-work.md#7-h264-and-aac-video).
 
 ## What it changes
 

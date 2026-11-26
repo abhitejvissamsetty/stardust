@@ -23,6 +23,39 @@ let shownActiveId = null;
 let windowId = 0;
 let selectOnClick = false;
 let drag = null;
+// What someone typed in the address bar of each tab and hasn't sent, with the address
+// the tab had then. Switching tabs keeps it, as in Chrome. It goes when it's sent, when
+// Escape puts the page's address back, or when the tab goes somewhere else.
+const drafts = new Map();
+
+function saveDraft() {
+  const tab = activeTab();
+  if (!tab) {
+    return;
+  }
+  const text = address.value;
+  if (text.startsWith(">") || text === shownUrl(tab.url)) {
+    drafts.delete(tab.id);
+  } else {
+    drafts.set(tab.id, { text, url: tab.url });
+  }
+}
+
+function forgetDraft() {
+  const tab = activeTab();
+  if (tab) {
+    drafts.delete(tab.id);
+  }
+}
+
+// The address bar's text for a tab: what was typed there, or the page's address.
+function addressText(tab) {
+  const draft = drafts.get(tab.id);
+  if (draft && draft.url !== tab.url) {
+    drafts.delete(tab.id);
+  }
+  return drafts.get(tab.id)?.text ?? shownUrl(tab.url);
+}
 
 const send = (command) => window.browserBridge.send(JSON.stringify(command));
 const activeTab = () => strip.tabs.find((tab) => tab.id === strip.activeId);
@@ -253,7 +286,7 @@ function render() {
   star.setAttribute("aria-label", starLabel);
 
   if (document.activeElement !== address) {
-    address.value = shownUrl(tab.url);
+    address.value = addressText(tab);
   }
 
   progress.style.opacity = tab.isLoading ? "1" : "0";
@@ -530,7 +563,15 @@ window.onBrowserEvent = (event) => {
     renderDownloads(event.items);
   } else if (event.type === "tabs") {
     const switched = event.strip.activeId !== strip.activeId;
+    if (switched && document.activeElement === address) {
+      saveDraft();
+    }
     strip = event.strip;
+    for (const id of drafts.keys()) {
+      if (!strip.tabs.some((tab) => tab.id === id)) {
+        drafts.delete(id);
+      }
+    }
     splitIds = event.split || [];
     windowId = event.windowId;
     document.documentElement.toggleAttribute("data-private", Boolean(event.private));
@@ -668,12 +709,14 @@ byId("address-form").addEventListener("submit", (event) => {
     return;
   }
   hideSuggestions();
+  forgetDraft();
   send({ type: "navigate", input: address.value });
   address.blur();
 });
 
 address.addEventListener("input", () => {
   typedQuery = address.value;
+  saveDraft();
   if (address.value.startsWith(">")) {
     showCommandResults();
     return;
@@ -722,16 +765,20 @@ address.addEventListener("keydown", (event) => {
     const positions = suggestions.length + 1;
     selectedSuggestion = ((selectedSuggestion + 1 + step + positions) % positions) - 1;
     address.value = selectedSuggestion >= 0 ? suggestions[selectedSuggestion].url : typedQuery;
+    saveDraft();
     showPopupUnder(byId("address-form"), suggestions, selectedSuggestion);
   } else if (event.key === "Escape" && commandMode) {
     hideSuggestions();
+    forgetDraft();
     address.value = shownUrl(activeTab()?.url ?? "");
     address.select();
   } else if (event.key === "Escape") {
     if (suggestions.length > 0) {
       hideSuggestions();
       address.value = typedQuery;
+      saveDraft();
     } else {
+      forgetDraft();
       address.value = shownUrl(activeTab()?.url ?? "");
       address.select();
     }

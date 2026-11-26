@@ -9,7 +9,10 @@ license = "MPL-2.0"
 authors = ["Ambiqa"]
 
 [workspace.dependencies]
-cef = { version = "=156.2.0", default-features = false }
+# CEF 158 (Chromium 158.0.8127.89). cef-rs hasn't released its 158 bindings to crates.io
+# yet, so this pins the commit its own bot generated them in. Move back to a crates.io
+# version once one for 158 is out.
+cef = { git = "https://github.com/tauri-apps/cef-rs", rev = "b3ff2019e53333a8e542642fed415d3e511ecd1b", default-features = false }
 
 [profile.release]
 lto = "thin"

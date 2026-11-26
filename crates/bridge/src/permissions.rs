@@ -112,6 +112,21 @@ impl SitePermissions {
         }
     }
 
+    /// The answer for a private window, whose own choices are in `session` and go with
+    /// it. Saved blocks still apply there, but saved allows don't: a site gets nothing
+    /// in a private window without being asked, as in Chrome.
+    pub fn answer_in_private(
+        &self,
+        session: &SitePermissions,
+        site: &str,
+        requested: &[Permission],
+    ) -> Answer {
+        if self.answer(site, requested) == Answer::Block {
+            return Answer::Block;
+        }
+        session.answer(site, requested)
+    }
+
     pub fn remember(&mut self, site: &str, permissions: &[Permission], decision: Decision) {
         if site_origin(site).as_deref() != Some(site) {
             return;
@@ -134,6 +149,33 @@ impl SitePermissions {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn private_windows_inherit_blocks_but_not_allows() {
+        let mut saved = SitePermissions::default();
+        saved.remember("https://a.example", &[Permission::Camera], Decision::Allow);
+        saved.remember("https://b.example", &[Permission::Camera], Decision::Block);
+        let mut session = SitePermissions::default();
+        assert_eq!(
+            saved.answer_in_private(&session, "https://a.example", &[Permission::Camera]),
+            Answer::Ask(vec![Permission::Camera])
+        );
+        assert_eq!(
+            saved.answer_in_private(&session, "https://b.example", &[Permission::Camera]),
+            Answer::Block
+        );
+        session.remember("https://a.example", &[Permission::Camera], Decision::Allow);
+        assert_eq!(
+            saved.answer_in_private(&session, "https://a.example", &[Permission::Camera]),
+            Answer::Allow
+        );
+        session.remember("https://b.example", &[Permission::Camera], Decision::Allow);
+        assert_eq!(
+            saved.answer_in_private(&session, "https://b.example", &[Permission::Camera]),
+            Answer::Block
+        );
+    }
+
     use super::*;
 
     const SITE: &str = "https://meet.example";

@@ -20,9 +20,9 @@ import subprocess
 import sys
 import urllib.request
 
-# Must match the `cef` crate: CEF 156.0.14+g4fa4ab5+chromium-156.0.8078.48.
-CEF_BRANCH = "8078"
-CEF_COMMIT = "4fa4ab516"
+# Must match the `cef` crate: CEF 158.0.6+g23f1736+chromium-158.0.8127.89.
+CEF_BRANCH = "8127"
+CEF_COMMIT = "23f1736"
 AUTOMATE_URL = (
     "https://raw.githubusercontent.com/chromiumembedded/cef/"
     f"{CEF_COMMIT}/tools/automate/automate-git.py"

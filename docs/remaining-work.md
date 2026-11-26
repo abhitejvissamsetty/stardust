@@ -6,7 +6,7 @@ Read first: [roadmap.md](roadmap.md), then [milestone-3.md](milestone-3.md) and 
 
 ## Context
 
-- **Stardust** is a Rust browser on Chromium through CEF 156 (`cef-rs`), using CEF's Alloy style, so all browser UI is Stardust's own web pages (`ui/`).
+- **Stardust** is a Rust browser on Chromium through CEF 158 (`cef-rs`, pinned to a commit until its 158 release reaches crates.io), using CEF's Alloy style, so all browser UI is Stardust's own web pages (`ui/`).
 - **Branch:** Milestones 3 and 4 are on the local branch `milestone-3` (commits `28f87ea` and `6c55f95`), not merged into `main` and not pushed. The project isn't on GitHub yet, so CI has never run.
 - **The roadmap is a draft.** The original plan isn't in the repo. Milestones 3 and 4 were drafted from hints in the earlier docs. If the real plan turns up, check it against this list.
 - **Platforms:** Linux ran Milestones 0 to 2. macOS (Apple Silicon) ran Milestones 3 and 4. Windows has never run.
@@ -108,9 +108,9 @@ Stock CEF builds leave these out, so many sites' videos fail. **Decided on 2026-
 
 ### The build
 
-The patch and build script are in [cef-build/](../cef-build/README.md). The patch applies to Chromium 156.0.8078.48, GN accepts the settings, and the one patched file Linux builds compiles. Nothing has been built in full or run yet.
+The patch and build script are in [cef-build/](../cef-build/README.md). The patch applied to Chromium 156.0.8078.48, GN accepted the settings, and the one patched file Linux builds compiled. Stardust has since moved to CEF 158 (Chromium 158.0.8127.89) for its security fixes, and the patch hasn't been tried against it: it will likely need updating for Chromium 158's media code. Nothing has been built in full or run yet.
 
-- CEF 156.0.14 (commit `4fa4ab5`, Chromium 156.0.8078.48, CEF branch 8078), matching the `cef` crate. Build with CEF's `automate-git.py --branch=8078 --checkout=4fa4ab5`, with the settings above in `GN_DEFINES`.
+- CEF 158.0.6 (commit `23f1736`, Chromium 158.0.8127.89, CEF branch 8127), matching the `cef` crate. Build with CEF's `automate-git.py --branch=8127 --checkout=23f1736`, with the settings above in `GN_DEFINES`.
 - Each system builds on its own kind of computer: Linux on Linux, Windows on Windows, macOS on a Mac.
 - Needs at least 16 GB RAM, 32 GB or more recommended, about 200 GB of disk, and about 4 hours on 16 cores ([CEF build guide](https://chromiumembedded.github.io/cef/master_build_quick_start)). The Linux computer used so far has 4 cores and 7 GB RAM, which isn't enough.
 - Stardust then uses it without code changes: `cef-rs` takes a local build from `CEF_PATH`, or downloads from `CEF_DOWNLOAD_URL`.
